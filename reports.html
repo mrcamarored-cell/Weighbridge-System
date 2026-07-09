@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>الفلترة والتقارير</title>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { getFirestore, collection, getDocs, query, where, orderBy, Timestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyD8vEIq7vPDE3EXdZLBPr3gjygZN9MpQgs",
+  authDomain: "weighbridge-system-ee0b0.firebaseapp.com",
+  projectId: "weighbridge-system-ee0b0",
+  storageBucket: "weighbridge-system-ee0b0.firebasestorage.app",
+  messagingSenderId: "1087988339377",
+  appId: "1:1087988339377:web:3fedc03a481e786b384890"
+};
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+onAuthStateChanged(auth, (user) => {
+  if (!user) { window.location.href = "index.html"; return; }
+  document.getElementById("loadingScreen").style.display = "none";
+  document.getElementById("mainContent").style.display = "block";
+});
+document.getElementById("logoutBtn").addEventListener("click", async () => { if(confirm("تسجيل الخروج؟")){ await signOut(auth); window.location.href="index.html"; }});
+document.getElementById("backBtn").addEventListener("click", () => window.location.href = "dashboard.html");
+
+document.getElementById("filterForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const fromDate = document.getElementById("fromDate").value;
+  const toDate = document.getElementById("toDate").value;
+  if (!fromDate || !toDate) { alert("الرجاء تحديد الفترة"); return; }
+
+  const fromTs = Timestamp.fromDate(new Date(fromDate + "T00:00:00"));
+  const toTs = Timestamp.fromDate(new Date(toDate + "T23:59:59"));
+
+  const q = query(
+    collection(db, "weightReports"),
+    where("createdAt", ">=", fromTs),
+    where("createdAt", "<=", toTs),
+    orderBy("createdAt", "desc")
+  );
+
+  const snap = await getDocs(q);
+  const records = [];
+  snap.forEach(d => records.push(d.data()));
+
+  renderResults(records);
+});
+
+function renderResults(records) {
+  const totals = {
+    DRI: { count: 0, tons: 0 },
+    "MILL SCALE": { count: 0, tons: 0 },
+    "OXIDE FINES": { count: 0, tons: 0 },
+  };
+  let grandCount = 0, grandTons = 0;
+
+  records.forEach(r => {
+    const type = r.shipmentType;
+    if (totals[type]) {
+      totals[type].count++;
+      totals[type].tons += Number(r.tons) || 0;
+    }
+    grandCount++;
+    grandTons += Number(r.tons) || 0;
+  });
+
+  document.getElementById("resultsSection").style.display = "block";
+  document.getElementById("driCount").textContent = totals.DRI.count;
+  document.getElementById("driTons").textContent = totals.DRI.tons.toFixed(2);
+  document.getElementById("millCount").textContent = totals["MILL SCALE"].count;
+  document.getElementById("millTons").textContent = totals["MILL SCALE"].tons.toFixed(2);
+  document.getElementById("oxideCount").textContent = totals["OXIDE FINES"].count;
+  document.getElementById("oxideTons").textContent = totals["OXIDE FINES"].tons.toFixed(2);
+  document.getElementById("grandCount").textContent = grandCount;
+  document.getElementById("grandTons").textContent = grandTons.toFixed(2);
+
+  const tbody = document.getElementById("tbody");
+  tbody.innerHTML = "";
+  if (records.length === 0) {
+    tbody.innerHTML = "<tr><td colspan='6'>لا توجد سجلات في هذه الفترة</td></tr>";
+    return;
+  }
+  records.forEach(r => {
+    const date = r.createdAt ? r.createdAt.toDate().toLocaleString("ar-EG") : "—";
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${date}</td>
+      <td>${r.truckNumber || ""}</td>
+      <td>${r.shipmentType || ""}</td>
+      <td>${r.payloadType || ""}</td>
+      <td>${(Number(r.tons) || 0).toFixed(3)}</td>
+      <td>${r.createdBy || ""}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+</script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI',Tahoma,Arial,sans-serif; }
+body { background:#f4f6f9; min-height:100vh; }
+#loadingScreen { display:flex; align-items:center; justify-content:center; height:100vh; color:#718096; }
+#mainContent { display:none; }
+header { background:linear-gradient(135deg,#1e3a5f,#2c5282); color:#fff; padding:14px 24px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; }
+header h1{ font-size:17px; }
+.header-actions button{ background:rgba(255,255,255,.15); color:#fff; border:1px solid rgba(255,255,255,.4); padding:7px 14px; border-radius:6px; cursor:pointer; font-size:13px; margin-right:8px; }
+.container{ max-width:1000px; margin:24px auto; padding:0 16px; }
+.card{ background:#fff; border-radius:10px; padding:22px; box-shadow:0 2px 8px rgba(0,0,0,.06); margin-bottom:20px; }
+.card h2{ font-size:16px; color:#1e3a5f; margin-bottom:14px; }
+.form-row{ display:flex; gap:12px; flex-wrap:wrap; align-items:end; }
+.form-group label{ display:block; font-size:12px; color:#4a5568; margin-bottom:4px; }
+.form-row input{ padding:10px 12px; border:1.5px solid #e2e8f0; border-radius:7px; font-size:14px; }
+.form-row button{ padding:10px 20px; background:#2c5282; color:#fff; border:none; border-radius:7px; cursor:pointer; font-weight:700; }
+
+.totals-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
+.total-item{ background:#f8fafc; border-radius:8px; padding:14px; text-align:center; border:1px solid #edf2f7; }
+.total-item .label{ font-size:12px; color:#718096; }
+.total-item .value{ font-size:18px; font-weight:700; color:#2d3748; margin-top:4px; }
+.grand{ background:#2c5282; color:#fff; }
+.grand .label{ color:#cbd5e0; }
+.grand .value{ color:#fff; }
+
+table{ width:100%; border-collapse:collapse; font-size:13px; }
+th,td{ padding:9px; text-align:right; border-bottom:1px solid #edf2f7; }
+th{ background:#f8fafc; color:#4a5568; }
+#resultsSection{ display:none; }
+</style>
+</head>
+<body>
+<div id="loadingScreen">جاري التحقق من الجلسة...</div>
+<div id="mainContent">
+  <header>
+    <h1>📊 الفلترة والتقارير</h1>
+    <div class="header-actions">
+      <button id="backBtn">↩ القائمة الرئيسية</button>
+      <button id="logoutBtn">تسجيل الخروج</button>
+    </div>
+  </header>
+  <div class="container">
+    <div class="card">
+      <h2>تحديد الفترة</h2>
+      <form id="filterForm" class="form-row">
+        <div class="form-group"><label>من تاريخ</label><input type="date" id="fromDate" required></div>
+        <div class="form-group"><label>إلى تاريخ</label><input type="date" id="toDate" required></div>
+        <button type="submit">🔍 عرض النتائج</button>
+      </form>
+    </div>
+
+    <div id="resultsSection">
+      <div class="card">
+        <h2>الإجماليات</h2>
+        <div class="totals-grid">
+          <div class="total-item"><div class="label">DRI - عدد</div><div class="value" id="driCount">0</div></div>
+          <div class="total-item"><div class="label">DRI - طن</div><div class="value" id="driTons">0</div></div>
+          <div class="total-item"><div class="label">Mill Scale - عدد</div><div class="value" id="millCount">0</div></div>
+          <div class="total-item"><div class="label">Mill Scale - طن</div><div class="value" id="millTons">0</div></div>
+          <div class="total-item"><div class="label">Oxide Fines - عدد</div><div class="value" id="oxideCount">0</div></div>
+          <div class="total-item"><div class="label">Oxide Fines - طن</div><div class="value" id="oxideTons">0</div></div>
+          <div class="total-item grand"><div class="label">الإجمالي - عدد</div><div class="value" id="grandCount">0</div></div>
+          <div class="total-item grand"><div class="label">الإجمالي - طن</div><div class="value" id="grandTons">0</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>السجلات</h2>
+        <table>
+          <thead><tr><th>التاريخ</th><th>الشاحنة</th><th>نوع الشحنة</th><th>نوع الحمولة</th><th>الأطنان</th><th>بواسطة</th></tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

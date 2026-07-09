@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>التقليم Trimming</title>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { getFirestore, collection, getDocs, addDoc, updateDoc, doc, query, where } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyD8vEIq7vPDE3EXdZLBPr3gjygZN9MpQgs",
+  authDomain: "weighbridge-system-ee0b0.firebaseapp.com",
+  projectId: "weighbridge-system-ee0b0",
+  storageBucket: "weighbridge-system-ee0b0.firebasestorage.app",
+  messagingSenderId: "1087988339377",
+  appId: "1:1087988339377:web:3fedc03a481e786b384890"
+};
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+let settingDocId = null;
+
+onAuthStateChanged(auth, async (user) => {
+  if (!user) { window.location.href = "index.html"; return; }
+  document.getElementById("loadingScreen").style.display = "none";
+  document.getElementById("mainContent").style.display = "block";
+  await loadData();
+});
+document.getElementById("logoutBtn").addEventListener("click", async () => { if(confirm("تسجيل الخروج؟")){ await signOut(auth); window.location.href="index.html"; }});
+document.getElementById("backBtn").addEventListener("click", () => window.location.href = "dashboard.html");
+
+async function loadData() {
+  const snap = await getDocs(collection(db, "trimmingSettings"));
+  let targetQty = 0;
+
+  if (snap.empty) {
+    const target = prompt("لا يوجد هدف محدد. الرجاء إدخال الكمية المستهدفة (بالطن):");
+    targetQty = Number(target) || 0;
+    const docRef = await addDoc(collection(db, "trimmingSettings"), { targetQty });
+    settingDocId = docRef.id;
+  } else {
+    const d = snap.docs[0];
+    settingDocId = d.id;
+    targetQty = d.data().targetQty || 0;
+  }
+
+  document.getElementById("targetQty").textContent = targetQty.toFixed(2);
+
+  // إجمالي المُقلّم (Status = Trimming)
+  const trimmingQ = query(collection(db, "weightReports"), where("status", "==", "Trimming"));
+  const trimmingSnap = await getDocs(trimmingQ);
+  let totalTrimming = 0;
+  trimmingSnap.forEach(d => totalTrimming += Number(d.data().tons) || 0);
+
+  document.getElementById("totalTrimming").textContent = totalTrimming.toFixed(2);
+  document.getElementById("remainingQty").textContent = (targetQty - totalTrimming).toFixed(2);
+}
+
+document.getElementById("updateTargetBtn").addEventListener("click", async () => {
+  const newTarget = prompt("أدخل الكمية المستهدفة الجديدة (بالطن):");
+  if (newTarget === null) return;
+  const val = Number(newTarget);
+  if (!val) { alert("قيمة غير صحيحة"); return; }
+  await updateDoc(doc(db, "trimmingSettings", settingDocId), { targetQty: val });
+  await loadData();
+});
+</script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI',Tahoma,Arial,sans-serif; }
+body { background:#f4f6f9; min-height:100vh; }
+#loadingScreen { display:flex; align-items:center; justify-content:center; height:100vh; color:#718096; }
+#mainContent { display:none; }
+header { background:linear-gradient(135deg,#1e3a5f,#2c5282); color:#fff; padding:14px 24px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; }
+header h1{ font-size:17px; }
+.header-actions button{ background:rgba(255,255,255,.15); color:#fff; border:1px solid rgba(255,255,255,.4); padding:7px 14px; border-radius:6px; cursor:pointer; font-size:13px; margin-right:8px; }
+.container{ max-width:700px; margin:24px auto; padding:0 16px; }
+.card{ background:#fff; border-radius:10px; padding:26px; box-shadow:0 2px 8px rgba(0,0,0,.06); }
+.stat-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:16px; margin-bottom:20px; }
+.stat{ background:#f8fafc; border-radius:10px; padding:20px; text-align:center; border:1px solid #edf2f7; }
+.stat .label{ font-size:13px; color:#718096; margin-bottom:6px; }
+.stat .value{ font-size:26px; font-weight:800; color:#2d3748; }
+.stat.remain .value{ color:#2c5282; }
+#updateTargetBtn{ width:100%; padding:12px; background:#2c5282; color:#fff; border:none; border-radius:8px; font-weight:700; cursor:pointer; }
+</style>
+</head>
+<body>
+<div id="loadingScreen">جاري التحقق من الجلسة...</div>
+<div id="mainContent">
+  <header>
+    <h1>🎯 التقليم (Trimming)</h1>
+    <div class="header-actions">
+      <button id="backBtn">↩ القائمة الرئيسية</button>
+      <button id="logoutBtn">تسجيل الخروج</button>
+    </div>
+  </header>
+  <div class="container">
+    <div class="card">
+      <div class="stat-grid">
+        <div class="stat"><div class="label">الكمية المستهدفة (طن)</div><div class="value" id="targetQty">0</div></div>
+        <div class="stat"><div class="label">إجمالي المُقلّم (طن)</div><div class="value" id="totalTrimming">0</div></div>
+        <div class="stat remain"><div class="label">المتبقي (طن)</div><div class="value" id="remainingQty">0</div></div>
+      </div>
+      <button id="updateTargetBtn">✏️ تعديل الكمية المستهدفة</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>
