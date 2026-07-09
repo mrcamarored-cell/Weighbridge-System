@@ -1,300 +1,142 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html lang="en" dir="ltr">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>القائمة الرئيسية - نظام إدارة الوزن</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard - Weighbridge System</title>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import {
-      getAuth,
-      onAuthStateChanged,
-      signOut
-    } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-    import {
-      getFirestore,
-      doc,
-      getDoc
-    } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+const firebaseConfig = {
+  apiKey: "AIzaSyD8vEIq7vPDE3EXdZLBPr3gjygZN9MpQgs",
+  authDomain: "weighbridge-system-ee0b0.firebaseapp.com",
+  projectId: "weighbridge-system-ee0b0",
+  storageBucket: "weighbridge-system-ee0b0.firebasestorage.app",
+  messagingSenderId: "1087988339377",
+  appId: "1:1087988339377:web:3fedc03a481e786b384890"
+};
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
 
-    // ===== إعدادات Firebase =====
-    const firebaseConfig = {
-      apiKey: "AIzaSyD8vEIq7vPDE3EXdZLBPr3gjygZN9MpQgs",
-      authDomain: "weighbridge-system-ee0b0.firebaseapp.com",
-      projectId: "weighbridge-system-ee0b0",
-      storageBucket: "weighbridge-system-ee0b0.firebasestorage.app",
-      messagingSenderId: "1087988339377",
-      appId: "1:1087988339377:web:3fedc03a481e786b384890"
-    };
+const userNameEl = document.getElementById("userName");
+const userRoleEl = document.getElementById("userRole");
+const logoutBtn = document.getElementById("logoutBtn");
+const loadingScreen = document.getElementById("loadingScreen");
+const mainContent = document.getElementById("mainContent");
 
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
+onAuthStateChanged(auth, async (user) => {
+  if (!user) { window.location.href = "index.html"; return; }
 
-    const userNameEl = document.getElementById("userName");
-    const userRoleEl = document.getElementById("userRole");
-    const logoutBtn = document.getElementById("logoutBtn");
-    const menuGrid = document.getElementById("menuGrid");
-    const loadingScreen = document.getElementById("loadingScreen");
-    const mainContent = document.getElementById("mainContent");
+  let role = "user";
+  let displayName = user.email;
 
-    // ===== التحقق من تسجيل الدخول =====
-    onAuthStateChanged(auth, async (user) => {
-      if (!user) {
-        // غير مسجل دخول -> رجّعه لصفحة الدخول
-        window.location.href = "index.html";
-        return;
-      }
-
-      // جلب بيانات المستخدم من Firestore (الدور/الصلاحية)
-      let role = "user";
-      let displayName = user.email;
-
-      try {
-        const userDocRef = doc(db, "users", user.uid);
-        const userDocSnap = await getDoc(userDocRef);
-        if (userDocSnap.exists()) {
-          const data = userDocSnap.data();
-          role = data.role || "user";
-          displayName = data.name || user.email;
-        }
-      } catch (err) {
-        console.error("Error fetching user data:", err);
-      }
-
-      userNameEl.textContent = displayName;
-      userRoleEl.textContent = role === "admin" ? "مسؤول" : "مستخدم";
-
-      // إخفاء عناصر خاصة بالأدمن فقط إن لم يكن أدمن
-      if (role !== "admin") {
-        document.querySelectorAll(".admin-only").forEach(el => el.style.display = "none");
-      }
-
-      loadingScreen.style.display = "none";
-      mainContent.style.display = "block";
-    });
-
-    // ===== تسجيل الخروج =====
-    logoutBtn.addEventListener("click", async () => {
-      if (confirm("هل تريد تسجيل الخروج؟")) {
-        await signOut(auth);
-        window.location.href = "index.html";
-      }
-    });
-  </script>
-
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-      font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+  try {
+    const userDocRef = doc(db, "users", user.uid);
+    const userDocSnap = await getDoc(userDocRef);
+    if (userDocSnap.exists()) {
+      const data = userDocSnap.data();
+      role = data.role || "user";
+      displayName = data.name || user.email;
     }
+  } catch (err) { console.error(err); }
 
-    body {
-      background: #f4f6f9;
-      min-height: 100vh;
-    }
+  userNameEl.textContent = displayName;
+  userRoleEl.textContent = role === "admin" ? "Admin" : "User";
 
-    /* شاشة التحميل */
-    #loadingScreen {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      height: 100vh;
-      font-size: 18px;
-      color: #718096;
-    }
+  if (role !== "admin") {
+    document.querySelectorAll(".admin-only").forEach(el => el.style.display = "none");
+  }
 
-    #mainContent {
-      display: none;
-    }
+  loadingScreen.style.display = "none";
+  mainContent.style.display = "block";
+});
 
-    /* الهيدر */
-    header {
-      background: linear-gradient(135deg, #1e3a5f 0%, #2c5282 100%);
-      color: #fff;
-      padding: 16px 24px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 12px;
-    }
-
-    header h1 {
-      font-size: 18px;
-    }
-
-    .user-info {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-    }
-
-    .user-info .details {
-      text-align: left;
-      font-size: 13px;
-    }
-
-    .user-info .details .name {
-      font-weight: 700;
-      font-size: 14px;
-    }
-
-    .user-info .details .role {
-      opacity: 0.85;
-    }
-
-    #logoutBtn {
-      background: rgba(255,255,255,0.15);
-      color: #fff;
-      border: 1px solid rgba(255,255,255,0.4);
-      padding: 8px 16px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 13px;
-      transition: background 0.2s;
-    }
-
-    #logoutBtn:hover {
-      background: rgba(255,255,255,0.3);
-    }
-
-    /* شبكة القوائم */
-    .menu-container {
-      max-width: 1100px;
-      margin: 32px auto;
-      padding: 0 20px;
-    }
-
-    .menu-title {
-      font-size: 20px;
-      color: #1e3a5f;
-      margin-bottom: 20px;
-      font-weight: 700;
-    }
-
-    #menuGrid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-      gap: 18px;
-    }
-
-    .menu-card {
-      background: #fff;
-      border-radius: 10px;
-      padding: 24px 18px;
-      text-align: center;
-      text-decoration: none;
-      color: #2d3748;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-      transition: transform 0.15s, box-shadow 0.15s;
-      border: 1px solid #edf2f7;
-      display: block;
-    }
-
-    .menu-card:hover {
-      transform: translateY(-3px);
-      box-shadow: 0 8px 20px rgba(0,0,0,0.1);
-      border-color: #2c5282;
-    }
-
-    .menu-card .icon {
-      font-size: 34px;
-      margin-bottom: 10px;
-    }
-
-    .menu-card .title {
-      font-size: 15px;
-      font-weight: 700;
-      margin-bottom: 4px;
-    }
-
-    .menu-card .desc {
-      font-size: 12px;
-      color: #718096;
-    }
-
-    .admin-only .icon {
-      color: #c53030;
-    }
-
-    footer {
-      text-align: center;
-      color: #a0aec0;
-      font-size: 12px;
-      padding: 30px 20px;
-    }
-  </style>
+logoutBtn.addEventListener("click", async () => {
+  if (confirm("Sign out?")) { await signOut(auth); window.location.href = "index.html"; }
+});
+</script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI',Tahoma,Arial,sans-serif; }
+body { background:#f4f6f9; min-height:100vh; }
+#loadingScreen { display:flex; align-items:center; justify-content:center; height:100vh; color:#718096; }
+#mainContent { display:none; }
+header { background:linear-gradient(135deg,#1e3a5f,#2c5282); color:#fff; padding:16px 24px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; }
+header h1{ font-size:18px; }
+.user-info{ display:flex; align-items:center; gap:14px; }
+.user-info .details{ text-align:right; font-size:13px; }
+.user-info .details .name{ font-weight:700; font-size:14px; }
+.user-info .details .role{ opacity:.85; }
+#logoutBtn{ background:rgba(255,255,255,.15); color:#fff; border:1px solid rgba(255,255,255,.4); padding:8px 16px; border-radius:6px; cursor:pointer; font-size:13px; }
+#logoutBtn:hover{ background:rgba(255,255,255,.3); }
+.menu-container{ max-width:1100px; margin:32px auto; padding:0 20px; }
+.menu-title{ font-size:20px; color:#1e3a5f; margin-bottom:20px; font-weight:700; }
+#menuGrid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:18px; }
+.menu-card{ background:#fff; border-radius:10px; padding:24px 18px; text-align:center; text-decoration:none; color:#2d3748; box-shadow:0 2px 8px rgba(0,0,0,.06); transition:transform .15s,box-shadow .15s; border:1px solid #edf2f7; display:block; }
+.menu-card:hover{ transform:translateY(-3px); box-shadow:0 8px 20px rgba(0,0,0,.1); border-color:#2c5282; }
+.menu-card .icon{ font-size:34px; margin-bottom:10px; }
+.menu-card .title{ font-size:15px; font-weight:700; margin-bottom:4px; }
+.menu-card .desc{ font-size:12px; color:#718096; }
+footer{ text-align:center; color:#a0aec0; font-size:12px; padding:30px 20px; }
+</style>
 </head>
 <body>
-
-  <div id="loadingScreen">جاري التحقق من الجلسة...</div>
-
-  <div id="mainContent">
-    <header>
-      <h1>🏭 نظام إدارة الوزن</h1>
-      <div class="user-info">
-        <div class="details">
-          <div class="name" id="userName">—</div>
-          <div class="role" id="userRole">—</div>
-        </div>
-        <button id="logoutBtn">تسجيل الخروج</button>
+<div id="loadingScreen">Checking session...</div>
+<div id="mainContent">
+  <header>
+    <h1>🏭 Weighbridge System</h1>
+    <div class="user-info">
+      <div class="details">
+        <div class="name" id="userName">—</div>
+        <div class="role" id="userRole">—</div>
       </div>
-    </header>
-
-    <div class="menu-container">
-      <div class="menu-title">القائمة الرئيسية</div>
-
-      <div id="menuGrid">
-        <a href="weight-entry.html" class="menu-card">
-          <div class="icon">⚖️</div>
-          <div class="title">إدخال وزن جديد</div>
-          <div class="desc">تسجيل شحنة ووزن شاحنة</div>
-        </a>
-
-        <a href="reports.html" class="menu-card">
-          <div class="icon">📊</div>
-          <div class="title">الفلترة والتقارير</div>
-          <div class="desc">عرض الإجماليات حسب الفترة</div>
-        </a>
-
-        <a href="manage-record.html" class="menu-card">
-          <div class="icon">🔍</div>
-          <div class="title">إدارة السجلات</div>
-          <div class="desc">بحث، تعديل، حذف سجل</div>
-        </a>
-
-        <a href="trimming.html" class="menu-card">
-          <div class="icon">🎯</div>
-          <div class="title">التقليم (Trimming)</div>
-          <div class="desc">متابعة الكمية المستهدفة</div>
-        </a>
-
-        <a href="trucks.html" class="menu-card">
-          <div class="icon">🚚</div>
-          <div class="title">بيانات الشاحنات</div>
-          <div class="desc">إدارة الأوزان الفارغة للشاحنات</div>
-        </a>
-
-        <a href="skip-weights.html" class="menu-card">
-          <div class="icon">📦</div>
-          <div class="title">أوزان السكيب/الحاويات</div>
-          <div class="desc">إدارة الأوزان الفارغة</div>
-        </a>
-
-        <a href="users.html" class="menu-card admin-only">
-          <div class="icon">👤</div>
-          <div class="title">إدارة المستخدمين</div>
-          <div class="desc">للمسؤولين فقط</div>
-        </a>
-      </div>
+      <button id="logoutBtn">Sign Out</button>
     </div>
+  </header>
 
-    <footer>Weighbridge Management System — نظام إدارة الوزن</footer>
+  <div class="menu-container">
+    <div class="menu-title">Main Menu</div>
+    <div id="menuGrid">
+      <a href="weight-entry.html" class="menu-card">
+        <div class="icon">⚖️</div>
+        <div class="title">New Weight Entry</div>
+        <div class="desc">Record a shipment / truck weight</div>
+      </a>
+      <a href="reports.html" class="menu-card">
+        <div class="icon">📊</div>
+        <div class="title">Filter & Reports</div>
+        <div class="desc">View totals by date range</div>
+      </a>
+      <a href="manage-record.html" class="menu-card">
+        <div class="icon">🔍</div>
+        <div class="title">Manage Records</div>
+        <div class="desc">Search, edit, delete a record</div>
+      </a>
+      <a href="trimming.html" class="menu-card">
+        <div class="icon">🎯</div>
+        <div class="title">Trimming</div>
+        <div class="desc">Track target quantity</div>
+      </a>
+      <a href="trucks.html" class="menu-card">
+        <div class="icon">🚚</div>
+        <div class="title">Truck Details</div>
+        <div class="desc">Manage truck empty weights</div>
+      </a>
+      <a href="skip-weights.html" class="menu-card">
+        <div class="icon">📦</div>
+        <div class="title">Skip / Container Weights</div>
+        <div class="desc">Manage empty weights</div>
+      </a>
+      <a href="users.html" class="menu-card admin-only">
+        <div class="icon">👤</div>
+        <div class="title">User Management</div>
+        <div class="desc">Admin only</div>
+      </a>
+    </div>
   </div>
-
+  <footer>Weighbridge Management System</footer>
+</div>
 </body>
 </html>

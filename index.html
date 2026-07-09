@@ -1,19 +1,15 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html lang="en" dir="ltr">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>نظام إدارة الوزن - تسجيل الدخول</title>
+  <title>Weighbridge System - Login</title>
 
-  <!-- مكتبات Firebase -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import {
-      getAuth,
-      signInWithEmailAndPassword
-    } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+    import { getAuth, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+    import { getFirestore, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-    // ===== إعدادات Firebase الخاصة بمشروعك =====
     const firebaseConfig = {
       apiKey: "AIzaSyD8vEIq7vPDE3EXdZLBPr3gjygZN9MpQgs",
       authDomain: "weighbridge-system-ee0b0.firebaseapp.com",
@@ -25,174 +21,90 @@
 
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
+    const db = getFirestore(app);
 
-    // ===== عناصر الصفحة =====
     const loginForm = document.getElementById("loginForm");
-    const emailInput = document.getElementById("email");
+    const usernameInput = document.getElementById("username");
     const passwordInput = document.getElementById("password");
     const errorMsg = document.getElementById("errorMsg");
     const loginBtn = document.getElementById("loginBtn");
 
-    // ===== عملية تسجيل الدخول =====
     loginForm.addEventListener("submit", async (e) => {
       e.preventDefault();
       errorMsg.textContent = "";
       loginBtn.disabled = true;
-      loginBtn.textContent = "جاري تسجيل الدخول...";
+      loginBtn.textContent = "Signing in...";
 
-      const email = emailInput.value.trim();
+      const username = usernameInput.value.trim();
       const password = passwordInput.value;
 
       try {
-        const userCredential = await signInWithEmailAndPassword(auth, email, password);
-        // نجح تسجيل الدخول
+        const q = query(collection(db, "users"), where("username", "==", username));
+        const snap = await getDocs(q);
+
+        if (snap.empty) {
+          errorMsg.textContent = "Username not found.";
+          loginBtn.disabled = false;
+          loginBtn.textContent = "Sign In";
+          return;
+        }
+
+        const userData = snap.docs[0].data();
+        const email = userData.email;
+
+        await signInWithEmailAndPassword(auth, email, password);
         window.location.href = "dashboard.html";
+
       } catch (error) {
-        let msg = "حدث خطأ أثناء تسجيل الدخول.";
+        let msg = "An error occurred while signing in.";
         if (error.code === "auth/invalid-credential" || error.code === "auth/wrong-password") {
-          msg = "البريد الإلكتروني أو كلمة المرور غير صحيحة.";
-        } else if (error.code === "auth/user-not-found") {
-          msg = "لا يوجد مستخدم بهذا البريد الإلكتروني.";
-        } else if (error.code === "auth/invalid-email") {
-          msg = "صيغة البريد الإلكتروني غير صحيحة.";
+          msg = "Incorrect username or password.";
         } else if (error.code === "auth/too-many-requests") {
-          msg = "محاولات كثيرة فاشلة. حاول لاحقاً.";
+          msg = "Too many failed attempts. Try again later.";
         }
         errorMsg.textContent = msg;
       } finally {
         loginBtn.disabled = false;
-        loginBtn.textContent = "تسجيل الدخول";
+        loginBtn.textContent = "Sign In";
       }
     });
   </script>
 
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-      font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
-    }
-
-    body {
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: linear-gradient(135deg, #1e3a5f 0%, #2c5282 100%);
-      padding: 20px;
-    }
-
-    .login-container {
-      background: #ffffff;
-      border-radius: 12px;
-      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
-      padding: 40px 32px;
-      width: 100%;
-      max-width: 400px;
-    }
-
-    .logo {
-      text-align: center;
-      margin-bottom: 24px;
-    }
-
-    .logo h1 {
-      font-size: 22px;
-      color: #1e3a5f;
-      font-weight: 700;
-    }
-
-    .logo p {
-      font-size: 13px;
-      color: #718096;
-      margin-top: 4px;
-    }
-
-    .form-group {
-      margin-bottom: 18px;
-    }
-
-    label {
-      display: block;
-      margin-bottom: 6px;
-      font-size: 14px;
-      color: #2d3748;
-      font-weight: 600;
-    }
-
-    input[type="email"],
-    input[type="password"] {
-      width: 100%;
-      padding: 12px 14px;
-      border: 1.5px solid #e2e8f0;
-      border-radius: 8px;
-      font-size: 15px;
-      transition: border-color 0.2s;
-    }
-
-    input[type="email"]:focus,
-    input[type="password"]:focus {
-      outline: none;
-      border-color: #2c5282;
-    }
-
-    .login-btn {
-      width: 100%;
-      padding: 13px;
-      background: #2c5282;
-      color: #fff;
-      border: none;
-      border-radius: 8px;
-      font-size: 16px;
-      font-weight: 600;
-      cursor: pointer;
-      margin-top: 8px;
-      transition: background 0.2s;
-    }
-
-    .login-btn:hover:not(:disabled) {
-      background: #1e3a5f;
-    }
-
-    .login-btn:disabled {
-      opacity: 0.7;
-      cursor: not-allowed;
-    }
-
-    .error-msg {
-      color: #e53e3e;
-      font-size: 13px;
-      margin-top: 12px;
-      text-align: center;
-      min-height: 18px;
-    }
+    * { margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI',Tahoma,Arial,sans-serif; }
+    body { min-height:100vh; display:flex; align-items:center; justify-content:center; background:linear-gradient(135deg,#1e3a5f 0%,#2c5282 100%); padding:20px; }
+    .login-container { background:#fff; border-radius:12px; box-shadow:0 10px 40px rgba(0,0,0,.2); padding:40px 32px; width:100%; max-width:400px; }
+    .logo { text-align:center; margin-bottom:24px; }
+    .logo h1 { font-size:22px; color:#1e3a5f; font-weight:700; }
+    .logo p { font-size:13px; color:#718096; margin-top:4px; }
+    .form-group { margin-bottom:18px; }
+    label { display:block; margin-bottom:6px; font-size:14px; color:#2d3748; font-weight:600; }
+    input[type="text"], input[type="password"] { width:100%; padding:12px 14px; border:1.5px solid #e2e8f0; border-radius:8px; font-size:15px; }
+    input:focus { outline:none; border-color:#2c5282; }
+    .login-btn { width:100%; padding:13px; background:#2c5282; color:#fff; border:none; border-radius:8px; font-size:16px; font-weight:600; cursor:pointer; margin-top:8px; }
+    .login-btn:hover:not(:disabled) { background:#1e3a5f; }
+    .login-btn:disabled { opacity:.7; cursor:not-allowed; }
+    .error-msg { color:#e53e3e; font-size:13px; margin-top:12px; text-align:center; min-height:18px; }
   </style>
 </head>
 <body>
-
   <div class="login-container">
     <div class="logo">
-      <h1>نظام إدارة الوزن</h1>
-      <p>Weighbridge Management System</p>
+      <h1>Weighbridge System</h1>
+      <p>Weight Management System</p>
     </div>
-
     <form id="loginForm">
       <div class="form-group">
-        <label for="email">البريد الإلكتروني</label>
-        <input type="email" id="email" required autocomplete="username" placeholder="example@company.com">
+        <label for="username">Username</label>
+        <input type="text" id="username" required autocomplete="username" placeholder="e.g. ali.admin">
       </div>
-
       <div class="form-group">
-        <label for="password">كلمة المرور</label>
+        <label for="password">Password</label>
         <input type="password" id="password" required autocomplete="current-password" placeholder="••••••••">
       </div>
-
-      <button type="submit" id="loginBtn" class="login-btn">تسجيل الدخول</button>
-
+      <button type="submit" id="loginBtn" class="login-btn">Sign In</button>
       <div id="errorMsg" class="error-msg"></div>
     </form>
   </div>
-
 </body>
 </html>

@@ -1,14 +1,14 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html lang="en" dir="ltr">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>إدخال وزن جديد</title>
+<title>New Weight Entry</title>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import {
-  getFirestore, collection, addDoc, doc, getDoc, getDocs, query, where, serverTimestamp, Timestamp
+  getFirestore, collection, addDoc, getDocs, query, where, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -33,11 +33,10 @@ onAuthStateChanged(auth, (user) => {
 });
 
 document.getElementById("logoutBtn").addEventListener("click", async () => {
-  if (confirm("هل تريد تسجيل الخروج؟")) { await signOut(auth); window.location.href = "index.html"; }
+  if (confirm("Sign out?")) { await signOut(auth); window.location.href = "index.html"; }
 });
 document.getElementById("backBtn").addEventListener("click", () => window.location.href = "dashboard.html");
 
-// ===== عناصر النموذج =====
 const truckInput = document.getElementById("truckNumber");
 const payloadTypeSel = document.getElementById("payloadType");
 const skipNumberInput = document.getElementById("skipNumber");
@@ -55,14 +54,13 @@ const tonsBox = document.getElementById("tonsBox");
 let truckEmptyWeight = 0;
 let skipEmptyWeight = 0;
 
-// ===== إظهار/إخفاء رقم السكيب =====
 payloadTypeSel.addEventListener("change", async () => {
   if (payloadTypeSel.value === "Skip") {
     skipGroup.style.display = "block";
     skipEmptyWeight = 0;
   } else if (payloadTypeSel.value === "Container") {
     skipGroup.style.display = "none";
-    skipEmptyWeight = 2500; // وزن ثابت للحاوية
+    skipEmptyWeight = 2500;
   } else {
     skipGroup.style.display = "none";
     skipEmptyWeight = 0;
@@ -70,7 +68,6 @@ payloadTypeSel.addEventListener("change", async () => {
   recalc();
 });
 
-// ===== البحث عن وزن الشاحنة الفارغ =====
 truckInput.addEventListener("blur", async () => {
   const val = truckInput.value.trim();
   truckEmptyWeight = 0;
@@ -80,19 +77,16 @@ truckInput.addEventListener("blur", async () => {
     const q = query(collection(db, "trucks"), where("truckNumber", "==", val));
     const snap = await getDocs(q);
     if (snap.empty) {
-      alert("رقم الشاحنة غير موجود. الرجاء إضافته في صفحة بيانات الشاحنات.");
+      alert("Truck number not found. Please add it in Truck Details.");
     } else {
       const data = snap.docs[0].data();
       truckEmptyWeight = Number(data.emptyWeightKg) || 0;
-      truckEmptyWeightEl.textContent = truckEmptyWeight + " كجم";
+      truckEmptyWeightEl.textContent = truckEmptyWeight + " kg";
     }
-  } catch (err) {
-    console.error(err);
-  }
+  } catch (err) { console.error(err); }
   recalc();
 });
 
-// ===== البحث عن وزن السكيب الفارغ =====
 skipNumberInput.addEventListener("blur", async () => {
   const val = skipNumberInput.value.trim();
   skipEmptyWeight = 0;
@@ -102,15 +96,13 @@ skipNumberInput.addEventListener("blur", async () => {
     const q = query(collection(db, "skipWeights"), where("skipNumber", "==", val));
     const snap = await getDocs(q);
     if (snap.empty) {
-      alert("رقم السكيب غير موجود.");
+      alert("Skip number not found.");
     } else {
       const data = snap.docs[0].data();
       skipEmptyWeight = Number(data.emptyWeight) || 0;
-      skipEmptyWeightEl.textContent = skipEmptyWeight + " كجم";
+      skipEmptyWeightEl.textContent = skipEmptyWeight + " kg";
     }
-  } catch (err) {
-    console.error(err);
-  }
+  } catch (err) { console.error(err); }
   recalc();
 });
 
@@ -118,7 +110,7 @@ grossInput.addEventListener("input", recalc);
 
 function recalc() {
   if (payloadTypeSel.value === "Container") {
-    skipEmptyWeightEl.textContent = skipEmptyWeight + " كجم (ثابت)";
+    skipEmptyWeightEl.textContent = skipEmptyWeight + " kg (fixed)";
   }
 
   const gross = Number(grossInput.value) || 0;
@@ -130,7 +122,6 @@ function recalc() {
   kgEl.textContent = kg.toFixed(0);
   tonsEl.textContent = tons.toFixed(3);
 
-  // تلوين حسب النوع
   tonsBox.className = "tons-box";
   if (!grossInput.value || !truckInput.value || !payloadTypeSel.value) {
     tonsBox.classList.add("neutral");
@@ -150,7 +141,6 @@ function recalc() {
   }
 }
 
-// ===== الحفظ =====
 document.getElementById("weightForm").addEventListener("submit", async (e) => {
   e.preventDefault();
 
@@ -161,11 +151,11 @@ document.getElementById("weightForm").addEventListener("submit", async (e) => {
   const skipNumber = skipNumberInput.value.trim();
 
   if (!truckNumber || !payloadType || !shipmentType || !gross) {
-    alert("الرجاء تعبئة جميع الحقول المطلوبة.");
+    alert("Please fill in all required fields.");
     return;
   }
   if (payloadType === "Skip" && !skipNumber) {
-    alert("الرجاء إدخال رقم السكيب.");
+    alert("Please enter the skip number.");
     return;
   }
 
@@ -173,39 +163,29 @@ document.getElementById("weightForm").addEventListener("submit", async (e) => {
   const kg = gross - emptyWT;
   const tons = kg / 1000;
 
-  // تحقق من تجاوز الوزن
   const overweight = (payloadType === "Container" && tons > 13.1) || (payloadType === "Skip" && tons > 18.5);
 
   if (overweight) {
-    const pass = prompt("⚠️ الوزن يتجاوز الحد المسموح. الرجاء إدخال كلمة مرور المشرف للمتابعة:");
+    const pass = prompt("⚠️ Weight exceeds the allowed limit. Enter supervisor password to continue:");
     if (pass === null) return;
-    // تحقق بسيط عبر Firestore (جدول supervisors) - أو يمكن ربطه بنظام تحقق أدق لاحقاً
     const ok = await verifySupervisorPassword(pass);
-    if (!ok) { alert("كلمة المرور غير صحيحة. تم إلغاء الحفظ."); return; }
+    if (!ok) { alert("Incorrect password. Save cancelled."); return; }
   }
 
   const saveBtn = document.getElementById("saveBtn");
   saveBtn.disabled = true;
-  saveBtn.textContent = "جاري الحفظ...";
+  saveBtn.textContent = "Saving...";
 
   try {
     const docRef = await addDoc(collection(db, "weightReports"), {
-      truckNumber,
-      payloadType,
+      truckNumber, payloadType,
       skipNumber: payloadType === "Skip" ? skipNumber : "",
-      shipmentType,
-      grossWeight: gross,
-      truckEmptyWeight,
-      skipEmptyWeight,
-      emptyWT,
-      kg,
-      tons,
-      status: "Trimming",
-      createdBy: currentUserEmail,
-      createdAt: serverTimestamp()
+      shipmentType, grossWeight: gross,
+      truckEmptyWeight, skipEmptyWeight, emptyWT, kg, tons,
+      status: "Trimming", createdBy: currentUserEmail, createdAt: serverTimestamp()
     });
 
-    alert("✅ تم الحفظ بنجاح! رقم السجل: " + docRef.id);
+    alert("✅ Saved successfully! Record ID: " + docRef.id);
     document.getElementById("weightForm").reset();
     skipGroup.style.display = "none";
     truckEmptyWeight = 0; skipEmptyWeight = 0;
@@ -214,10 +194,10 @@ document.getElementById("weightForm").addEventListener("submit", async (e) => {
     recalc();
   } catch (err) {
     console.error(err);
-    alert("حدث خطأ أثناء الحفظ: " + err.message);
+    alert("Error while saving: " + err.message);
   } finally {
     saveBtn.disabled = false;
-    saveBtn.textContent = "💾 حفظ السجل";
+    saveBtn.textContent = "💾 Save Record";
   }
 });
 
@@ -226,13 +206,9 @@ async function verifySupervisorPassword(pass) {
     const q = query(collection(db, "users"), where("password", "==", pass), where("role", "==", "admin"));
     const snap = await getDocs(q);
     return !snap.empty;
-  } catch (err) {
-    console.error(err);
-    return false;
-  }
+  } catch (err) { console.error(err); return false; }
 }
 </script>
-
 <style>
 * { margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI',Tahoma,Arial,sans-serif; }
 body { background:#f4f6f9; min-height:100vh; }
@@ -243,21 +219,17 @@ header h1{ font-size:17px; }
 .header-actions{ display:flex; gap:10px; }
 .header-actions button{ background:rgba(255,255,255,.15); color:#fff; border:1px solid rgba(255,255,255,.4); padding:7px 14px; border-radius:6px; cursor:pointer; font-size:13px; }
 .header-actions button:hover{ background:rgba(255,255,255,.3); }
-
 .container{ max-width:900px; margin:24px auto; padding:0 16px; }
 .card{ background:#fff; border-radius:10px; padding:24px; box-shadow:0 2px 8px rgba(0,0,0,.06); margin-bottom:20px; }
 .card h2{ font-size:16px; color:#1e3a5f; margin-bottom:16px; }
-
 .grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; }
 .form-group label{ display:block; font-size:13px; font-weight:600; color:#2d3748; margin-bottom:5px; }
 .form-group input, .form-group select{ width:100%; padding:10px 12px; border:1.5px solid #e2e8f0; border-radius:7px; font-size:14px; }
 .form-group input:focus, .form-group select:focus{ outline:none; border-color:#2c5282; }
-
 .results-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; margin-top:10px; }
 .result-item{ background:#f8fafc; border-radius:8px; padding:12px; text-align:center; border:1px solid #edf2f7; }
 .result-item .label{ font-size:12px; color:#718096; margin-bottom:4px; }
 .result-item .value{ font-size:16px; font-weight:700; color:#2d3748; }
-
 .tons-box{ grid-column:1/-1; border-radius:10px; padding:20px; text-align:center; margin-top:6px; transition:background .2s; }
 .tons-box .label{ font-size:13px; opacity:.85; }
 .tons-box .value{ font-size:32px; font-weight:800; }
@@ -265,97 +237,87 @@ header h1{ font-size:17px; }
 .tons-box.ok{ background:#c6f6d5; color:#22543d; }
 .tons-box.low{ background:#fefcbf; color:#744210; }
 .tons-box.over{ background:#fed7d7; color:#822727; }
-
 #saveBtn{ width:100%; padding:14px; background:#2c5282; color:#fff; border:none; border-radius:8px; font-size:16px; font-weight:700; cursor:pointer; margin-top:8px; }
 #saveBtn:hover:not(:disabled){ background:#1e3a5f; }
 #saveBtn:disabled{ opacity:.7; }
 </style>
 </head>
 <body>
-
-<div id="loadingScreen">جاري التحقق من الجلسة...</div>
-
+<div id="loadingScreen">Checking session...</div>
 <div id="mainContent">
   <header>
-    <h1>⚖️ إدخال وزن جديد</h1>
+    <h1>⚖️ New Weight Entry</h1>
     <div class="header-actions">
-      <button id="backBtn">↩ القائمة الرئيسية</button>
-      <button id="logoutBtn">تسجيل الخروج</button>
+      <button id="backBtn">↩ Main Menu</button>
+      <button id="logoutBtn">Sign Out</button>
     </div>
   </header>
-
   <div class="container">
     <form id="weightForm">
       <div class="card">
-        <h2>بيانات الشحنة</h2>
+        <h2>Shipment Details</h2>
         <div class="grid">
           <div class="form-group">
-            <label>نوع الشحنة *</label>
+            <label>Shipment Type *</label>
             <select id="shipmentType" required>
-              <option value="">اختر...</option>
+              <option value="">Select...</option>
               <option value="DRI">DRI</option>
               <option value="MILL SCALE">Mill Scale</option>
               <option value="OXIDE FINES">Oxide Fines</option>
             </select>
           </div>
-
           <div class="form-group">
-            <label>رقم الشاحنة *</label>
-            <input type="text" id="truckNumber" required placeholder="مثال: 12345">
+            <label>Truck Number *</label>
+            <input type="text" id="truckNumber" required placeholder="e.g. 12345">
           </div>
-
           <div class="form-group">
-            <label>نوع الحمولة *</label>
+            <label>Payload Type *</label>
             <select id="payloadType" required>
-              <option value="">اختر...</option>
-              <option value="Container">حاوية (Container)</option>
-              <option value="Skip">سكيب (Skip)</option>
+              <option value="">Select...</option>
+              <option value="Container">Container</option>
+              <option value="Skip">Skip</option>
             </select>
           </div>
-
           <div class="form-group" id="skipGroup" style="display:none;">
-            <label>رقم السكيب *</label>
-            <input type="text" id="skipNumber" placeholder="مثال: S-01">
+            <label>Skip Number *</label>
+            <input type="text" id="skipNumber" placeholder="e.g. S-01">
           </div>
-
           <div class="form-group">
-            <label>الوزن القائم (Gross) بالكجم *</label>
+            <label>Gross Weight (kg) *</label>
             <input type="number" id="grossWeight" required placeholder="0" step="0.01">
           </div>
         </div>
       </div>
 
       <div class="card">
-        <h2>الحساب التلقائي</h2>
+        <h2>Automatic Calculation</h2>
         <div class="results-grid">
           <div class="result-item">
-            <div class="label">وزن الشاحنة الفارغ</div>
+            <div class="label">Truck Empty Weight</div>
             <div class="value" id="truckEmptyWeight">—</div>
           </div>
           <div class="result-item">
-            <div class="label">وزن الحاوية/السكيب الفارغ</div>
+            <div class="label">Container/Skip Empty Weight</div>
             <div class="value" id="skipEmptyWeight">—</div>
           </div>
           <div class="result-item">
-            <div class="label">إجمالي الوزن الفارغ</div>
+            <div class="label">Total Empty Weight</div>
             <div class="value" id="emptyWT">0</div>
           </div>
           <div class="result-item">
-            <div class="label">الوزن الصافي (كجم)</div>
+            <div class="label">Net Weight (kg)</div>
             <div class="value" id="kg">0</div>
           </div>
-
           <div class="tons-box neutral" id="tonsBox">
-            <div class="label">الوزن بالأطنان</div>
+            <div class="label">Weight in Tons</div>
             <div class="value" id="tons">0.000</div>
           </div>
         </div>
       </div>
 
-      <button type="submit" id="saveBtn">💾 حفظ السجل</button>
+      <button type="submit" id="saveBtn">💾 Save Record</button>
     </form>
   </div>
 </div>
-
 </body>
 </html>
