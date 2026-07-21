@@ -7,7 +7,7 @@
 <script type="module">
 import {
   requireAuth, requireRole, signOut, auth, db, createUserWithEmailAndPassword,
-  collection, getDocs, deleteDoc, doc, setDoc, updateDoc
+  collection, getDocs, deleteDoc, doc, getDoc, setDoc, updateDoc
 } from "./firebase-config.js";
 
 requireAuth((user, profile) => {
@@ -26,9 +26,9 @@ const roleLabels = {
 
 async function loadUsers() {
   const tbody = document.getElementById("tbody");
-  tbody.innerHTML = "<tr><td colspan='6'>Loading...</td></tr>";
+  tbody.innerHTML = "<tr><td colspan='7'>Loading...</td></tr>";
   const snap = await getDocs(collection(db, "users"));
-  if (snap.empty) { tbody.innerHTML = "<tr><td colspan='6'>No users</td></tr>"; return; }
+  if (snap.empty) { tbody.innerHTML = "<tr><td colspan='7'>No users</td></tr>"; return; }
   tbody.innerHTML = "";
 
   const now = Date.now();
@@ -44,6 +44,10 @@ async function loadUsers() {
       <td>${roleLabels[u.role] || u.role}</td>
       <td>${u.employeeId || "—"}</td>
       <td>${isOnline ? "🟢 Online" : "⚪ Offline"}</td>
+      <td>
+        <button class="editBtn" data-id="${d.id}">✏️ Edit</button>
+        <button class="forceBtn" data-id="${d.id}" ${isOnline ? "" : "disabled"}>🚪 Force Logout</button>
+      </td>
       <td><button class="delBtn" data-id="${d.id}">🗑 Delete</button></td>
     `;
     tbody.appendChild(tr);
@@ -51,13 +55,53 @@ async function loadUsers() {
 
   document.querySelectorAll(".delBtn").forEach(btn => {
     btn.addEventListener("click", async () => {
-      if (confirm("Remove this user's profile?")) {
+      if (confirm("Remove this user's profile? (Their login account must still be deleted manually in Firebase Console)")) {
         await deleteDoc(doc(db, "users", btn.dataset.id));
         loadUsers();
       }
     });
   });
+
+  document.querySelectorAll(".forceBtn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      if (confirm("Force this user to sign out now?")) {
+        await updateDoc(doc(db, "users", btn.dataset.id), { forceLogout: true });
+        alert("They will be signed out within 20 seconds.");
+      }
+    });
+  });
+
+  document.querySelectorAll(".editBtn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const snap2 = await getDoc(doc(db, "users", btn.dataset.id));
+      if (!snap2.exists()) return;
+      const u = snap2.data();
+      document.getElementById("editDocId").value = btn.dataset.id;
+      document.getElementById("editName").value = u.name || "";
+      document.getElementById("editRole").value = u.role || "";
+      document.getElementById("editEmployeeId").value = u.employeeId || "";
+      document.getElementById("editModal").style.display = "flex";
+    });
+  });
 }
+
+document.getElementById("editForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const docId = document.getElementById("editDocId").value;
+  const name = document.getElementById("editName").value.trim();
+  const role = document.getElementById("editRole").value;
+  const employeeId = document.getElementById("editEmployeeId").value.trim();
+
+  const rolesRequiringId = ["weighbridge", "loading", "warehouse"];
+  if (rolesRequiringId.includes(role) && !employeeId) { alert("Employee ID is required for this role."); return; }
+
+  await updateDoc(doc(db, "users", docId), { name, role, employeeId: employeeId || null });
+  document.getElementById("editModal").style.display = "none";
+  loadUsers();
+});
+document.getElementById("cancelEditBtn").addEventListener("click", () => {
+  document.getElementById("editModal").style.display = "none";
+});
 
 document.getElementById("userForm").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -106,6 +150,18 @@ table{ width:100%; border-collapse:collapse; font-size:13px; }
 th,td{ padding:9px; text-align:left; border-bottom:1px solid #edf2f7; }
 th{ background:#f8fafc; color:#4a5568; }
 .delBtn{ background:#fed7d7; color:#822727; border:none; padding:5px 10px; border-radius:6px; cursor:pointer; font-size:12px; }
+.editBtn{ background:#bee3f8; color:#2a4365; border:none; padding:5px 10px; border-radius:6px; cursor:pointer; font-size:12px; margin-left:4px; }
+.forceBtn{ background:#feebc8; color:#7b341e; border:none; padding:5px 10px; border-radius:6px; cursor:pointer; font-size:12px; margin-left:4px; }
+.forceBtn:disabled{ opacity:.4; cursor:not-allowed; }
+#editModal{ display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); align-items:center; justify-content:center; z-index:1000; }
+#editModal .modal-box{ background:#fff; border-radius:10px; padding:24px; width:100%; max-width:400px; }
+#editModal h2{ font-size:16px; color:#1e3a5f; margin-bottom:14px; }
+#editModal label{ display:block; font-size:13px; font-weight:600; margin:10px 0 4px; }
+#editModal input, #editModal select{ width:100%; padding:10px 12px; border:1.5px solid #e2e8f0; border-radius:7px; font-size:14px; }
+#editModal .modal-actions{ display:flex; gap:10px; margin-top:16px; }
+#editModal .modal-actions button{ flex:1; padding:10px; border:none; border-radius:7px; cursor:pointer; font-weight:700; }
+#editModal .save-btn{ background:#2c5282; color:#fff; }
+#editModal .cancel-btn{ background:#e2e8f0; color:#4a5568; }
 </style>
 </head>
 <body>
@@ -149,6 +205,33 @@ th{ background:#f8fafc; color:#4a5568; }
     </div>
   </div>
 </div>
+
+<div id="editModal">
+  <div class="modal-box">
+    <h2>✏️ Edit User</h2>
+    <form id="editForm">
+      <input type="hidden" id="editDocId">
+      <label>Full Name</label>
+      <input type="text" id="editName" required>
+      <label>Role</label>
+      <select id="editRole" required>
+        <option value="weighbridge">Weighbridge</option>
+        <option value="loading">Stevedore</option>
+        <option value="warehouse">Warehouse</option>
+        <option value="supervisor">Supervisor</option>
+        <option value="viewer">Viewer</option>
+        <option value="admin">Admin</option>
+      </select>
+      <label>Employee ID</label>
+      <input type="text" id="editEmployeeId">
+      <div class="modal-actions">
+        <button type="button" id="cancelEditBtn" class="cancel-btn">Cancel</button>
+        <button type="submit" class="save-btn">Save Changes</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script src="version.js"></script>
 </body>
 </html>

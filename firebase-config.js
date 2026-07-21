@@ -52,6 +52,21 @@ export async function markUserActive(uid) {
 export function startActiveHeartbeat(uid) {
   markUserActive(uid);
   setInterval(() => markUserActive(uid), 60000); // every 60 seconds
+  setInterval(() => checkForceLogout(uid), 20000); // every 20 seconds
+}
+
+// ===== Check if an admin flagged this user for forced logout =====
+async function checkForceLogout(uid) {
+  try {
+    const userDocRef = doc(db, "users", uid);
+    const snap = await getDoc(userDocRef);
+    if (snap.exists() && snap.data().forceLogout === true) {
+      await updateDoc(userDocRef, { forceLogout: false, online: false });
+      alert("You have been signed out by an administrator.");
+      await signOut(auth);
+      window.location.href = "index.html";
+    }
+  } catch (err) { console.error(err); }
 }
 
 // ===== Require login, return user profile doc data =====

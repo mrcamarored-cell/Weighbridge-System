@@ -1,4 +1,4 @@
-const APP_VERSION = "v1.0.0";
+const APP_VERSION = "v1.2.0";
 const APP_LAST_UPDATE = "2026-07-21";
 
 document.addEventListener("DOMContentLoaded", () => {
