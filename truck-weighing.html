@@ -174,7 +174,9 @@ document.getElementById("truckInForm").addEventListener("submit", async (e) => {
   }
 });
 
-// ================= TRUCK OUT =================
+// ================= PGI (weigh loaded truck) =================
+let pgiDocId = null, pgiEmptyWeight = 0;
+
 document.getElementById("searchOutForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const val = document.getElementById("searchOutInput").value.trim();
@@ -183,44 +185,69 @@ document.getElementById("searchOutForm").addEventListener("submit", async (e) =>
   const q = query(
     collection(db, "deliveries"),
     where("truckNumber", "==", val),
-    where("status", "in", ["Truck In", "Loading"]),
     orderBy("createdAt", "desc"),
     limit(1)
   );
   const snap = await getDocs(q);
   const resultBox = document.getElementById("outResultBox");
+  resultBox.style.display = "none";
 
-  if (snap.empty) {
-    resultBox.style.display = "none";
-    alert("No active delivery found for this truck (must be status Truck In or Loading).");
-    return;
-  }
+  if (snap.empty) { alert("Truck not found. Please check the truck number."); return; }
 
   const docSnap = snap.docs[0];
   const data = docSnap.data();
+
+  if (data.status === "Truck In") {
+    alert("⚠️ This truck is still waiting to be loaded (Stevedore has not picked it yet).");
+    return;
+  }
+  if (data.status !== "Loading Complete") {
+    alert("⚠️ This truck cannot do PGI right now. Current status: " + data.status);
+    return;
+  }
+
+  pgiDocId = docSnap.id;
+  pgiEmptyWeight = Number(data.emptyWeight) || 0;
+
   document.getElementById("outDeliveryNo").textContent = data.deliveryNo;
   document.getElementById("outTruckNo").textContent = data.truckNumber;
-  document.getElementById("outBags").textContent = data.numberOfBags;
-  document.getElementById("outNet").textContent = (Number(data.netWeight)||0).toFixed(2);
+  document.getElementById("outBags").value = data.numberOfBags || "";
+  document.getElementById("outGross").value = "";
+  document.getElementById("outNetPreview").textContent = "0.00";
   resultBox.style.display = "block";
-  resultBox.dataset.docId = docSnap.id;
 });
 
-document.getElementById("confirmOutBtn").addEventListener("click", async () => {
-  const resultBox = document.getElementById("outResultBox");
-  const docId = resultBox.dataset.docId;
-  if (!docId) return;
-  if (!confirm("Confirm Truck Out?")) return;
+document.getElementById("outGross").addEventListener("input", updatePgiNet);
+document.getElementById("outBags").addEventListener("input", updatePgiNet);
+function updatePgiNet() {
+  const gross = Number(document.getElementById("outGross").value) || 0;
+  const net = gross - pgiEmptyWeight;
+  document.getElementById("outNetPreview").textContent = net > 0 ? net.toFixed(2) : "0.00";
+}
 
-  await updateDoc(doc(db, "deliveries", docId), {
+document.getElementById("confirmOutBtn").addEventListener("click", async () => {
+  if (!pgiDocId) return;
+  const gross = Number(document.getElementById("outGross").value) || 0;
+  const bags = Number(document.getElementById("outBags").value) || 0;
+  if (!gross) { alert("Please enter the actual (loaded) gross weight."); return; }
+  if (!bags) { alert("Please confirm number of bags."); return; }
+  if (!confirm("Confirm PGI for this truck?")) return;
+
+  const net = gross - pgiEmptyWeight;
+
+  await updateDoc(doc(db, "deliveries", pgiDocId), {
     status: "Truck Out",
-    truckOutBy: sessionStorage.getItem("employeeName") || currentProfile.name || currentUser.email,
-    truckOutAt: serverTimestamp()
+    grossWeight: gross,
+    numberOfBags: bags,
+    netWeight: net,
+    pgiBy: sessionStorage.getItem("employeeName") || currentProfile.name || currentUser.email,
+    pgiAt: serverTimestamp()
   });
 
-  alert("✅ Truck Out recorded.");
-  resultBox.style.display = "none";
+  alert("✅ PGI recorded. Truck is now on its way to the warehouse.");
+  document.getElementById("outResultBox").style.display = "none";
   document.getElementById("searchOutForm").reset();
+  pgiDocId = null;
 });
 </script>
 <style>
@@ -253,7 +280,7 @@ header h1{ font-size:17px; }
 <div id="loadingScreen">Checking session...</div>
 <div id="mainContent">
   <header>
-    <h1>⚖️ Weighbridge - Truck In / Out</h1>
+    <h1>⚖️ Weighbridge - Truck In / PGI</h1>
     <div id="operatorName" style="font-size:12px; opacity:.85;"></div>
     <div class="header-actions">
       <button id="backBtn">↩ Main Menu</button>
@@ -264,7 +291,7 @@ header h1{ font-size:17px; }
   <div class="container">
     <div class="tabs">
       <button id="tabIn" class="active">🚚 Truck In</button>
-      <button id="tabOut">🏁 Truck Out</button>
+      <button id="tabOut">🏁 PGI (Loaded Weight)</button>
     </div>
 
     <div id="panelIn">
@@ -316,7 +343,7 @@ header h1{ font-size:17px; }
 
     <div id="panelOut" style="display:none;">
       <div class="card">
-        <h2>Search Truck to Check Out</h2>
+        <h2>Search Truck for PGI</h2>
         <form id="searchOutForm" class="grid">
           <div class="form-group">
             <label>Truck No.</label>
@@ -330,9 +357,21 @@ header h1{ font-size:17px; }
         <h2>Delivery Details</h2>
         <div class="result-row"><span>Delivery No.</span><b id="outDeliveryNo"></b></div>
         <div class="result-row"><span>Truck No.</span><b id="outTruckNo"></b></div>
-        <div class="result-row"><span>Number of Bags</span><b id="outBags"></b></div>
-        <div class="result-row"><span>Net Weight (kg)</span><b id="outNet"></b></div>
-        <button id="confirmOutBtn">✔ Confirm Truck Out</button>
+        <div class="grid" style="margin-top:12px;">
+          <div class="form-group">
+            <label>Actual Gross Weight (kg) *</label>
+            <input type="number" id="outGross" required placeholder="Read from scale">
+          </div>
+          <div class="form-group">
+            <label>Confirm Number of Bags *</label>
+            <input type="number" id="outBags" required>
+          </div>
+          <div class="net-box">
+            <div class="label">Net Weight (kg)</div>
+            <div class="value" id="outNetPreview">0.00</div>
+          </div>
+        </div>
+        <button id="confirmOutBtn">✔ Confirm PGI</button>
       </div>
     </div>
   </div>

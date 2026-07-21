@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Warehouse Receiving</title>
 <script type="module">
-import { requireAuth, requireRole, signOut, auth, db, collection, query, where, orderBy, limit, getDocs, updateDoc, doc }
+import { requireAuth, requireRole, signOut, auth, db, collection, query, where, orderBy, limit, getDocs, updateDoc, doc, serverTimestamp }
   from "./firebase-config.js";
 
 requireAuth((user, profile) => {
@@ -26,20 +26,33 @@ document.getElementById("searchForm").addEventListener("submit", async (e) => {
   const q = query(
     collection(db, "deliveries"),
     where("truckNumber", "==", truckNumber),
-    where("status", "==", "Truck Out"),
     orderBy("createdAt", "desc"), limit(1)
   );
   const snap = await getDocs(q);
   const box = document.getElementById("resultBox");
+  box.style.display = "none";
 
   if (snap.empty) {
-    box.style.display = "none";
-    alert("No truck with status 'Truck Out' found for this number.");
+    alert("Truck not found. Please check the truck number.");
     return;
   }
 
   const d = snap.docs[0];
   const data = d.data();
+
+  if (data.status === "Truck In") {
+    alert("⚠️ This truck has not been loaded yet (still waiting at Stevedore).");
+    return;
+  }
+  if (data.status === "Loading Complete") {
+    alert("⚠️ This truck has not completed PGI at the weighbridge yet.");
+    return;
+  }
+  if (data.status !== "Truck Out") {
+    alert("⚠️ This truck cannot be received right now. Current status: " + data.status);
+    return;
+  }
+
   document.getElementById("resDeliveryNo").textContent = data.deliveryNo;
   document.getElementById("resTruckNo").textContent = data.truckNumber;
   document.getElementById("resBags").textContent = data.numberOfBags;
@@ -54,7 +67,11 @@ document.getElementById("confirmReceiptBtn").addEventListener("click", async () 
   const docId = box.dataset.docId;
   if (!confirm("Confirm receipt of this delivery?")) return;
 
-  await updateDoc(doc(db, "deliveries", docId), { status: "Received by Warehouse" });
+  await updateDoc(doc(db, "deliveries", docId), {
+    status: "Completed",
+    receivedBy: sessionStorage.getItem("employeeName") || "",
+    receivedAt: serverTimestamp()
+  });
 
   alert("✅ Receipt confirmed.");
   box.style.display = "none";
