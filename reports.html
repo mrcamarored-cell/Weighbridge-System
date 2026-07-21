@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reports</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script type="module">
+import { requireAuth, signOut, auth, db, collection, query, where, orderBy, getDocs, Timestamp }
+  from "./firebase-config.js";
+
+requireAuth((user, profile) => {
+  document.getElementById("loadingScreen").style.display = "none";
+  document.getElementById("mainContent").style.display = "block";
+});
+document.getElementById("logoutBtn").addEventListener("click", async () => { if(confirm("Sign out?")){ await signOut(auth); window.location.href="index.html"; }});
+document.getElementById("backBtn").addEventListener("click", () => window.location.href = "dashboard.html");
+
+let currentRecords = [];
+
+// ===== Tabs =====
+const tabDate = document.getElementById("tabDate");
+const tabTruck = document.getElementById("tabTruck");
+const panelDate = document.getElementById("panelDate");
+const panelTruck = document.getElementById("panelTruck");
+tabDate.addEventListener("click", () => switchTab("date"));
+tabTruck.addEventListener("click", () => switchTab("truck"));
+function switchTab(which) {
+  tabDate.classList.toggle("active", which==="date");
+  tabTruck.classList.toggle("active", which==="truck");
+  panelDate.style.display = which==="date" ? "block":"none";
+  panelTruck.style.display = which==="truck" ? "block":"none";
+}
+
+// ===== By Date/Time Range =====
+document.getElementById("dateForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const fromDate = document.getElementById("fromDate").value;
+  const fromTime = document.getElementById("fromTime").value || "00:00";
+  const toDate = document.getElementById("toDate").value;
+  const toTime = document.getElementById("toTime").value || "23:59";
+  if (!fromDate || !toDate) { alert("Please select date range"); return; }
+
+  const fromTs = Timestamp.fromDate(new Date(fromDate + "T" + fromTime + ":00"));
+  const toTs = Timestamp.fromDate(new Date(toDate + "T" + toTime + ":59"));
+
+  const q = query(
+    collection(db, "deliveries"),
+    where("createdAt", ">=", fromTs),
+    where("createdAt", "<=", toTs),
+    orderBy("createdAt", "desc")
+  );
+  const snap = await getDocs(q);
+  currentRecords = [];
+  snap.forEach(d => currentRecords.push(d.data()));
+  renderResults(currentRecords);
+});
+
+// ===== By Truck History =====
+document.getElementById("truckForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const truckNumber = document.getElementById("searchTruckNo").value.trim();
+  if (!truckNumber) return;
+
+  const q = query(collection(db, "deliveries"), where("truckNumber", "==", truckNumber), orderBy("createdAt", "desc"));
+  const snap = await getDocs(q);
+  currentRecords = [];
+  snap.forEach(d => currentRecords.push(d.data()));
+  renderResults(currentRecords);
+});
+
+function renderResults(records) {
+  document.getElementById("resultsSection").style.display = "block";
+  let totalWeight = 0, totalBags = 0;
+  records.forEach(r => { totalWeight += Number(r.netWeight)||0; totalBags += Number(r.numberOfBags)||0; });
+
+  document.getElementById("sumCount").textContent = records.length;
+  document.getElementById("sumWeight").textContent = (totalWeight/1000).toFixed(2);
+  document.getElementById("sumBags").textContent = totalBags;
+
+  const tbody = document.getElementById("tbody");
+  tbody.innerHTML = "";
+  if (records.length === 0) { tbody.innerHTML = "<tr><td colspan='8'>No records found</td></tr>"; return; }
+
+  records.forEach(r => {
+    const date = r.createdAt ? r.createdAt.toDate().toLocaleString("en-US") : "—";
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${r.deliveryNo||""}</td><td>${r.truckNumber||""}</td><td>${r.status||""}</td>
+      <td>${r.weighingMethod||""}</td><td>${r.numberOfBags||0}</td>
+      <td>${(Number(r.netWeight)||0).toFixed(2)}</td><td>${r.transporter||""}</td><td>${date}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+document.getElementById("exportBtn").addEventListener("click", () => {
+  if (currentRecords.length === 0) { alert("No data to export."); return; }
+
+  const rows = currentRecords.map(r => ({
+    "Delivery No.": r.deliveryNo || "",
+    "Truck No.": r.truckNumber || "",
+    "Status": r.status || "",
+    "Method": r.weighingMethod || "",
+    "Empty Weight": r.emptyWeight || "",
+    "Gross Weight": r.grossWeight || "",
+    "Net Weight (kg)": Number(r.netWeight) || 0,
+    "Bags": Number(r.numberOfBags) || 0,
+    "Transporter": r.transporter || "",
+    "Date": r.createdAt ? r.createdAt.toDate().toLocaleString("en-US") : ""
+  }));
+
+  let totalWeight = 0, totalBags = 0;
+  currentRecords.forEach(r => { totalWeight += Number(r.netWeight)||0; totalBags += Number(r.numberOfBags)||0; });
+  rows.push({});
+  rows.push({ "Delivery No.": "TOTAL", "Net Weight (kg)": totalWeight, "Bags": totalBags });
+
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Report");
+  XLSX.writeFile(wb, "Logistics_Report_" + new Date().toISOString().slice(0,10) + ".xlsx");
+});
+</script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI',Tahoma,Arial,sans-serif; }
+body { background:#f4f6f9; min-height:100vh; }
+#loadingScreen { display:flex; align-items:center; justify-content:center; height:100vh; color:#718096; }
+#mainContent { display:none; }
+header { background:linear-gradient(135deg,#1e3a5f,#2c5282); color:#fff; padding:14px 24px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; }
+header h1{ font-size:17px; }
+.header-actions button{ background:rgba(255,255,255,.15); color:#fff; border:1px solid rgba(255,255,255,.4); padding:7px 14px; border-radius:6px; cursor:pointer; font-size:13px; margin-left:8px; }
+.container{ max-width:1100px; margin:24px auto; padding:0 16px; }
+.tabs{ display:flex; gap:8px; margin-bottom:16px; }
+.tabs button{ flex:1; padding:12px; border:none; background:#e2e8f0; color:#4a5568; border-radius:8px; cursor:pointer; font-weight:700; font-size:14px; }
+.tabs button.active{ background:#2c5282; color:#fff; }
+.card{ background:#fff; border-radius:10px; padding:22px; box-shadow:0 2px 8px rgba(0,0,0,.06); margin-bottom:20px; }
+.card h2{ font-size:16px; color:#1e3a5f; margin-bottom:14px; }
+.form-row{ display:flex; gap:12px; flex-wrap:wrap; align-items:end; }
+.form-group label{ display:block; font-size:12px; color:#4a5568; margin-bottom:4px; }
+.form-row input{ padding:10px 12px; border:1.5px solid #e2e8f0; border-radius:7px; font-size:14px; }
+.form-row button{ padding:10px 20px; background:#2c5282; color:#fff; border:none; border-radius:7px; cursor:pointer; font-weight:700; }
+.totals-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:14px; }
+.total-item{ background:#f8fafc; border-radius:8px; padding:14px; text-align:center; border:1px solid #edf2f7; }
+.total-item .label{ font-size:12px; color:#718096; }
+.total-item .value{ font-size:18px; font-weight:700; color:#2d3748; margin-top:4px; }
+table{ width:100%; border-collapse:collapse; font-size:13px; }
+th,td{ padding:9px; text-align:left; border-bottom:1px solid #edf2f7; }
+th{ background:#f8fafc; color:#4a5568; }
+#resultsSection{ display:none; }
+#exportBtn{ background:#22543d; color:#fff; border:none; padding:10px 18px; border-radius:7px; cursor:pointer; font-weight:700; margin-bottom:14px; }
+</style>
+</head>
+<body>
+<div id="loadingScreen">Checking session...</div>
+<div id="mainContent">
+  <header>
+    <h1>📊 Reports</h1>
+    <div class="header-actions">
+      <button id="backBtn">↩ Main Menu</button>
+      <button id="logoutBtn">Sign Out</button>
+    </div>
+  </header>
+  <div class="container">
+    <div class="tabs">
+      <button id="tabDate" class="active">📅 By Date/Time</button>
+      <button id="tabTruck">🚚 By Truck History</button>
+    </div>
+
+    <div id="panelDate">
+      <div class="card">
+        <h2>Select Date & Time Range</h2>
+        <form id="dateForm" class="form-row">
+          <div class="form-group"><label>From Date</label><input type="date" id="fromDate" required></div>
+          <div class="form-group"><label>From Time</label><input type="time" id="fromTime"></div>
+          <div class="form-group"><label>To Date</label><input type="date" id="toDate" required></div>
+          <div class="form-group"><label>To Time</label><input type="time" id="toTime"></div>
+          <button type="submit">🔍 Show Results</button>
+        </form>
+      </div>
+    </div>
+
+    <div id="panelTruck" style="display:none;">
+      <div class="card">
+        <h2>Search by Truck Number</h2>
+        <form id="truckForm" class="form-row">
+          <div class="form-group"><label>Truck No.</label><input type="text" id="searchTruckNo" required></div>
+          <button type="submit">🔍 Show History</button>
+        </form>
+      </div>
+    </div>
+
+    <div id="resultsSection">
+      <div class="card">
+        <h2>Summary</h2>
+        <div class="totals-grid">
+          <div class="total-item"><div class="label">Total Records</div><div class="value" id="sumCount">0</div></div>
+          <div class="total-item"><div class="label">Total Weight (t)</div><div class="value" id="sumWeight">0</div></div>
+          <div class="total-item"><div class="label">Total Bags</div><div class="value" id="sumBags">0</div></div>
+        </div>
+        <button id="exportBtn">⬇ Export to Excel</button>
+        <table>
+          <thead><tr><th>Delivery No.</th><th>Truck</th><th>Status</th><th>Method</th><th>Bags</th><th>Net (kg)</th><th>Transporter</th><th>Date</th></tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="version.js"></script>
+</body>
+</html>
