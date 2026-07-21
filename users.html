@@ -26,9 +26,9 @@ const roleLabels = {
 
 async function loadUsers() {
   const tbody = document.getElementById("tbody");
-  tbody.innerHTML = "<tr><td colspan='7'>Loading...</td></tr>";
+  tbody.innerHTML = "<tr><td colspan='5'>Loading...</td></tr>";
   const snap = await getDocs(collection(db, "users"));
-  if (snap.empty) { tbody.innerHTML = "<tr><td colspan='7'>No users</td></tr>"; return; }
+  if (snap.empty) { tbody.innerHTML = "<tr><td colspan='5'>No users</td></tr>"; return; }
   tbody.innerHTML = "";
 
   const now = Date.now();
@@ -42,7 +42,6 @@ async function loadUsers() {
       <td>${u.name || "—"}</td>
       <td>${u.username || "—"}</td>
       <td>${roleLabels[u.role] || u.role}</td>
-      <td>${u.employeeId || "—"}</td>
       <td>${isOnline ? "🟢 Online" : "⚪ Offline"}</td>
       <td>
         <button class="editBtn" data-id="${d.id}">✏️ Edit</button>
@@ -79,7 +78,6 @@ async function loadUsers() {
       document.getElementById("editDocId").value = btn.dataset.id;
       document.getElementById("editName").value = u.name || "";
       document.getElementById("editRole").value = u.role || "";
-      document.getElementById("editEmployeeId").value = u.employeeId || "";
       document.getElementById("editModal").style.display = "flex";
     });
   });
@@ -90,12 +88,8 @@ document.getElementById("editForm").addEventListener("submit", async (e) => {
   const docId = document.getElementById("editDocId").value;
   const name = document.getElementById("editName").value.trim();
   const role = document.getElementById("editRole").value;
-  const employeeId = document.getElementById("editEmployeeId").value.trim();
 
-  const rolesRequiringId = ["weighbridge", "loading", "warehouse"];
-  if (rolesRequiringId.includes(role) && !employeeId) { alert("Employee ID is required for this role."); return; }
-
-  await updateDoc(doc(db, "users", docId), { name, role, employeeId: employeeId || null });
+  await updateDoc(doc(db, "users", docId), { name, role });
   document.getElementById("editModal").style.display = "none";
   loadUsers();
 });
@@ -109,20 +103,15 @@ document.getElementById("userForm").addEventListener("submit", async (e) => {
   const username = document.getElementById("username").value.trim();
   const password = document.getElementById("password").value;
   const role = document.getElementById("role").value;
-  const employeeId = document.getElementById("employeeId").value.trim();
-
   if (!name || !username || !password || !role) { alert("Please fill in all required fields"); return; }
   if (password.length < 6) { alert("Password must be at least 6 characters"); return; }
-
-  const rolesRequiringId = ["weighbridge", "loading", "warehouse"];
-  if (rolesRequiringId.includes(role) && !employeeId) { alert("Employee ID is required for this role."); return; }
 
   const email = username.toLowerCase().replace(/\s+/g, "") + "@logistics.local";
 
   try {
     const cred = await createUserWithEmailAndPassword(auth, email, password);
     await setDoc(doc(db, "users", cred.user.uid), {
-      name, username, email, role, employeeId: employeeId || null, password, online: false
+      name, username, email, role, password, online: false
     });
     alert("✅ User created. Username: " + username);
     document.getElementById("userForm").reset();
@@ -146,6 +135,7 @@ header h1{ font-size:17px; }
 .grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; }
 .grid input, .grid select{ padding:10px 12px; border:1.5px solid #e2e8f0; border-radius:7px; font-size:14px; }
 #userForm button{ margin-top:14px; padding:10px 20px; background:#2c5282; color:#fff; border:none; border-radius:7px; cursor:pointer; font-weight:700; }
+.note{ font-size:12px; color:#a0aec0; margin-top:8px; }
 table{ width:100%; border-collapse:collapse; font-size:13px; }
 th,td{ padding:9px; text-align:left; border-bottom:1px solid #edf2f7; }
 th{ background:#f8fafc; color:#4a5568; }
@@ -191,15 +181,15 @@ th{ background:#f8fafc; color:#4a5568; }
             <option value="viewer">Viewer</option>
             <option value="admin">Admin</option>
           </select>
-          <input type="text" id="employeeId" placeholder="Employee ID (if applicable)">
         </div>
         <button type="submit">➕ Create User</button>
+        <div class="note">Note: for Weighbridge/Stevedore/Warehouse, this creates a shared department login. Each employee enters their own Employee ID at sign-in — add employees under Settings.</div>
       </form>
     </div>
     <div class="card">
       <h2>Users & Online Status</h2>
       <table>
-        <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Employee ID</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Status</th><th></th></tr></thead>
         <tbody id="tbody"></tbody>
       </table>
     </div>
@@ -222,8 +212,6 @@ th{ background:#f8fafc; color:#4a5568; }
         <option value="viewer">Viewer</option>
         <option value="admin">Admin</option>
       </select>
-      <label>Employee ID</label>
-      <input type="text" id="editEmployeeId">
       <div class="modal-actions">
         <button type="button" id="cancelEditBtn" class="cancel-btn">Cancel</button>
         <button type="submit" class="save-btn">Save Changes</button>

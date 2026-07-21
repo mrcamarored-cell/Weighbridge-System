@@ -46,14 +46,16 @@ loginForm.addEventListener("submit", async (e) => {
         errorMsg.textContent = "Employee ID is required for your department.";
         resetBtn(); return;
       }
-      if (userData.employeeId !== employeeId) {
-        errorMsg.textContent = "Incorrect Employee ID.";
-        resetBtn(); return;
-      }
-      // Look up the employee's display name from the "employees" list
+      // Employee ID is NOT tied to one fixed account — many employees can share
+      // the same department username/password, each entering their own ID.
+      // We just look up their display name for the screen.
       const empQ = query(collection(db, "employees"), where("employeeId", "==", employeeId));
       const empSnap = await getDocs(empQ);
-      employeeName = empSnap.empty ? employeeId : empSnap.docs[0].data().name;
+      if (empSnap.empty) {
+        errorMsg.textContent = "Employee ID not found. Ask your admin to add it in Settings.";
+        resetBtn(); return;
+      }
+      employeeName = empSnap.docs[0].data().name;
     }
 
     await signInWithEmailAndPassword(auth, userData.email, password);
