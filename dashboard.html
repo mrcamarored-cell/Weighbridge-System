@@ -3,60 +3,85 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Dashboard - Weighbridge System</title>
+<title>Dashboard - Logistics System</title>
 <script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { requireAuth, signOut, auth, db, collection, getDocs } from "./firebase-config.js";
 
-const firebaseConfig = {
-  apiKey: "AIzaSyD8vEIq7vPDE3EXdZLBPr3gjygZN9MpQgs",
-  authDomain: "weighbridge-system-ee0b0.firebaseapp.com",
-  projectId: "weighbridge-system-ee0b0",
-  storageBucket: "weighbridge-system-ee0b0.firebasestorage.app",
-  messagingSenderId: "1087988339377",
-  appId: "1:1087988339377:web:3fedc03a481e786b384890"
-};
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-
-const userNameEl = document.getElementById("userName");
-const userRoleEl = document.getElementById("userRole");
-const logoutBtn = document.getElementById("logoutBtn");
-const loadingScreen = document.getElementById("loadingScreen");
-const mainContent = document.getElementById("mainContent");
-
-onAuthStateChanged(auth, async (user) => {
-  if (!user) { window.location.href = "index.html"; return; }
-
-  let role = "user";
-  let displayName = user.email;
-
-  try {
-    const userDocRef = doc(db, "users", user.uid);
-    const userDocSnap = await getDoc(userDocRef);
-    if (userDocSnap.exists()) {
-      const data = userDocSnap.data();
-      role = data.role || "user";
-      displayName = data.name || user.email;
-    }
-  } catch (err) { console.error(err); }
-
-  userNameEl.textContent = displayName;
-  userRoleEl.textContent = role === "admin" ? "Admin" : "User";
-
-  if (role !== "admin") {
-    document.querySelectorAll(".admin-only").forEach(el => el.style.display = "none");
-  }
-
-  loadingScreen.style.display = "none";
-  mainContent.style.display = "block";
+requireAuth(async (user, profile) => {
+  document.getElementById("userName").textContent = profile.name || user.email;
+  document.getElementById("userRole").textContent = roleLabel(profile.role);
+  buildMenu(profile.role);
+  await loadTargets();
+  document.getElementById("loadingScreen").style.display = "none";
+  document.getElementById("mainContent").style.display = "block";
 });
 
-logoutBtn.addEventListener("click", async () => {
+document.getElementById("logoutBtn").addEventListener("click", async () => {
   if (confirm("Sign out?")) { await signOut(auth); window.location.href = "index.html"; }
 });
+
+function roleLabel(role) {
+  const labels = {
+    weighbridge: "Weighbridge Officer", loading: "Loading/Unloading Officer",
+    warehouse: "Warehouse Officer", supervisor: "Shipping Supervisor",
+    viewer: "Viewer", admin: "Administrator"
+  };
+  return labels[role] || role;
+}
+
+function buildMenu(role) {
+  const menu = document.getElementById("menuGrid");
+  const items = [];
+
+  if (["weighbridge", "admin"].includes(role)) {
+    items.push({ href:"truck-weighing.html", icon:"⚖️", title:"Truck In / Out", desc:"Weighbridge entry & exit" });
+  }
+  if (["loading", "admin"].includes(role)) {
+    items.push({ href:"loading.html", icon:"📦", title:"Loading / Unloading", desc:"Record bags loaded" });
+  }
+  if (["warehouse", "admin"].includes(role)) {
+    items.push({ href:"warehouse.html", icon:"🏬", title:"Warehouse Receiving", desc:"Confirm receipt" });
+  }
+  if (["weighbridge","loading","warehouse","supervisor","viewer","admin"].includes(role)) {
+    items.push({ href:"tracking.html", icon:"📍", title:"Live Tracking", desc:"Truck movement status" });
+    items.push({ href:"reports.html", icon:"📊", title:"Reports", desc:"By date or truck history" });
+  }
+  if (role === "admin") {
+    items.push({ href:"users.html", icon:"👤", title:"User Management", desc:"Add users, see who's online" });
+    items.push({ href:"settings.html", icon:"⚙️", title:"Settings", desc:"Transporters, vessels, targets" });
+  }
+
+  menu.innerHTML = items.map(i => `
+    <a href="${i.href}" class="menu-card">
+      <div class="icon">${i.icon}</div>
+      <div class="title">${i.title}</div>
+      <div class="desc">${i.desc}</div>
+    </a>`).join("");
+}
+
+async function loadTargets() {
+  try {
+    const snap = await getDocs(collection(db, "settings"));
+    if (snap.empty) { document.getElementById("targetsCard").style.display = "none"; return; }
+    const s = snap.docs[0].data();
+
+    const dSnap = await getDocs(collection(db, "deliveries"));
+    let doneWeight = 0, doneBags = 0;
+    dSnap.forEach(d => {
+      const r = d.data();
+      doneWeight += Number(r.netWeight) || 0;
+      doneBags += Number(r.numberOfBags) || 0;
+    });
+
+    const targetWeight = Number(s.targetWeight) || 0;
+    const targetBags = Number(s.targetBags) || 0;
+
+    document.getElementById("doneWeight").textContent = doneWeight.toFixed(2);
+    document.getElementById("remainWeight").textContent = (targetWeight - doneWeight).toFixed(2);
+    document.getElementById("doneBags").textContent = doneBags;
+    document.getElementById("remainBags").textContent = (targetBags - doneBags);
+  } catch (err) { console.error(err); document.getElementById("targetsCard").style.display = "none"; }
+}
 </script>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI',Tahoma,Arial,sans-serif; }
@@ -68,10 +93,16 @@ header h1{ font-size:18px; }
 .user-info{ display:flex; align-items:center; gap:14px; }
 .user-info .details{ text-align:right; font-size:13px; }
 .user-info .details .name{ font-weight:700; font-size:14px; }
-.user-info .details .role{ opacity:.85; }
 #logoutBtn{ background:rgba(255,255,255,.15); color:#fff; border:1px solid rgba(255,255,255,.4); padding:8px 16px; border-radius:6px; cursor:pointer; font-size:13px; }
 #logoutBtn:hover{ background:rgba(255,255,255,.3); }
-.menu-container{ max-width:1100px; margin:32px auto; padding:0 20px; }
+.container{ max-width:1100px; margin:24px auto; padding:0 20px; }
+.card{ background:#fff; border-radius:10px; padding:22px; box-shadow:0 2px 8px rgba(0,0,0,.06); margin-bottom:24px; }
+.card h2{ font-size:16px; color:#1e3a5f; margin-bottom:14px; }
+.stat-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px; }
+.stat{ background:#f8fafc; border-radius:8px; padding:16px; text-align:center; border:1px solid #edf2f7; }
+.stat .label{ font-size:12px; color:#718096; }
+.stat .value{ font-size:22px; font-weight:800; color:#2d3748; margin-top:4px; }
+.stat.remain .value{ color:#2c5282; }
 .menu-title{ font-size:20px; color:#1e3a5f; margin-bottom:20px; font-weight:700; }
 #menuGrid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:18px; }
 .menu-card{ background:#fff; border-radius:10px; padding:24px 18px; text-align:center; text-decoration:none; color:#2d3748; box-shadow:0 2px 8px rgba(0,0,0,.06); transition:transform .15s,box-shadow .15s; border:1px solid #edf2f7; display:block; }
@@ -79,14 +110,13 @@ header h1{ font-size:18px; }
 .menu-card .icon{ font-size:34px; margin-bottom:10px; }
 .menu-card .title{ font-size:15px; font-weight:700; margin-bottom:4px; }
 .menu-card .desc{ font-size:12px; color:#718096; }
-footer{ text-align:center; color:#a0aec0; font-size:12px; padding:30px 20px; }
 </style>
 </head>
 <body>
 <div id="loadingScreen">Checking session...</div>
 <div id="mainContent">
   <header>
-    <h1>🏭 Weighbridge System</h1>
+    <h1>🚛 Logistics System</h1>
     <div class="user-info">
       <div class="details">
         <div class="name" id="userName">—</div>
@@ -96,48 +126,21 @@ footer{ text-align:center; color:#a0aec0; font-size:12px; padding:30px 20px; }
     </div>
   </header>
 
-  <div class="menu-container">
-    <div class="menu-title">Main Menu</div>
-    <div id="menuGrid">
-      <a href="weight-entry.html" class="menu-card">
-        <div class="icon">⚖️</div>
-        <div class="title">New Weight Entry</div>
-        <div class="desc">Record a shipment / truck weight</div>
-      </a>
-      <a href="reports.html" class="menu-card">
-        <div class="icon">📊</div>
-        <div class="title">Filter & Reports</div>
-        <div class="desc">View totals by date range</div>
-      </a>
-      <a href="manage-record.html" class="menu-card">
-        <div class="icon">🔍</div>
-        <div class="title">Manage Records</div>
-        <div class="desc">Search, edit, delete a record</div>
-      </a>
-      <a href="trimming.html" class="menu-card">
-        <div class="icon">🎯</div>
-        <div class="title">Trimming</div>
-        <div class="desc">Track target quantity</div>
-      </a>
-      <a href="trucks.html" class="menu-card">
-        <div class="icon">🚚</div>
-        <div class="title">Truck Details</div>
-        <div class="desc">Manage truck empty weights</div>
-      </a>
-      <a href="skip-weights.html" class="menu-card">
-        <div class="icon">📦</div>
-        <div class="title">Skip / Container Weights</div>
-        <div class="desc">Manage empty weights</div>
-      </a>
-      <a href="users.html" class="menu-card admin-only">
-        <div class="icon">👤</div>
-        <div class="title">User Management</div>
-        <div class="desc">Admin only</div>
-      </a>
+  <div class="container">
+    <div class="card" id="targetsCard">
+      <h2>Target Progress</h2>
+      <div class="stat-grid">
+        <div class="stat"><div class="label">Weight Done (t)</div><div class="value" id="doneWeight">0</div></div>
+        <div class="stat remain"><div class="label">Weight Remaining (t)</div><div class="value" id="remainWeight">0</div></div>
+        <div class="stat"><div class="label">Bags Done</div><div class="value" id="doneBags">0</div></div>
+        <div class="stat remain"><div class="label">Bags Remaining</div><div class="value" id="remainBags">0</div></div>
+      </div>
     </div>
+
+    <div class="menu-title">Main Menu</div>
+    <div id="menuGrid"></div>
   </div>
-  <footer>Weighbridge Management System</footer>
 </div>
-  <script src="version.js"></script>
+<script src="version.js"></script>
 </body>
 </html>

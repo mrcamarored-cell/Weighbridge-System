@@ -1,102 +1,120 @@
 <!DOCTYPE html>
 <html lang="en" dir="ltr">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Weighbridge System - Login</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Logistics System - Login</title>
+<script type="module">
+import { auth, db, signInWithEmailAndPassword, collection, query, where, getDocs }
+  from "./firebase-config.js";
 
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getAuth, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-    import { getFirestore, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+const loginForm = document.getElementById("loginForm");
+const usernameInput = document.getElementById("username");
+const passwordInput = document.getElementById("password");
+const employeeIdGroup = document.getElementById("employeeIdGroup");
+const employeeIdInput = document.getElementById("employeeId");
+const errorMsg = document.getElementById("errorMsg");
+const loginBtn = document.getElementById("loginBtn");
 
-    const firebaseConfig = {
-      apiKey: "AIzaSyD8vEIq7vPDE3EXdZLBPr3gjygZN9MpQgs",
-      authDomain: "weighbridge-system-ee0b0.firebaseapp.com",
-      projectId: "weighbridge-system-ee0b0",
-      storageBucket: "weighbridge-system-ee0b0.firebasestorage.app",
-      messagingSenderId: "1087988339377",
-      appId: "1:1087988339377:web:3fedc03a481e786b384890"
-    };
+loginForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  errorMsg.textContent = "";
+  loginBtn.disabled = true;
+  loginBtn.textContent = "Signing in...";
 
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
+  const username = usernameInput.value.trim();
+  const password = passwordInput.value;
+  const employeeId = employeeIdInput.value.trim();
 
-    const loginForm = document.getElementById("loginForm");
-    const usernameInput = document.getElementById("username");
-    const passwordInput = document.getElementById("password");
-    const errorMsg = document.getElementById("errorMsg");
-    const loginBtn = document.getElementById("loginBtn");
+  try {
+    const q = query(collection(db, "users"), where("username", "==", username));
+    const snap = await getDocs(q);
 
-    loginForm.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      errorMsg.textContent = "";
-      loginBtn.disabled = true;
-      loginBtn.textContent = "Signing in...";
+    if (snap.empty) {
+      errorMsg.textContent = "Username not found.";
+      resetBtn(); return;
+    }
 
-      const username = usernameInput.value.trim();
-      const password = passwordInput.value;
+    const userDoc = snap.docs[0];
+    const userData = userDoc.data();
 
-      try {
-        const q = query(collection(db, "users"), where("username", "==", username));
-        const snap = await getDocs(q);
-
-        if (snap.empty) {
-          errorMsg.textContent = "Username not found.";
-          loginBtn.disabled = false;
-          loginBtn.textContent = "Sign In";
-          return;
-        }
-
-        const userData = snap.docs[0].data();
-        const email = userData.email;
-
-        await signInWithEmailAndPassword(auth, email, password);
-        window.location.href = "dashboard.html";
-
-      } catch (error) {
-        let msg = "An error occurred while signing in.";
-        if (error.code === "auth/invalid-credential" || error.code === "auth/wrong-password") {
-          msg = "Incorrect username or password.";
-        } else if (error.code === "auth/too-many-requests") {
-          msg = "Too many failed attempts. Try again later.";
-        }
-        errorMsg.textContent = msg;
-      } finally {
-        loginBtn.disabled = false;
-        loginBtn.textContent = "Sign In";
+    // Roles that require an Employee ID (weighbridge, loading, warehouse)
+    const rolesRequiringId = ["weighbridge", "loading", "warehouse"];
+    if (rolesRequiringId.includes(userData.role)) {
+      if (!employeeId) {
+        errorMsg.textContent = "Employee ID is required for your department.";
+        resetBtn(); return;
       }
-    });
-  </script>
+      if (userData.employeeId !== employeeId) {
+        errorMsg.textContent = "Incorrect Employee ID.";
+        resetBtn(); return;
+      }
+    }
 
-  <style>
-    * { margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI',Tahoma,Arial,sans-serif; }
-    body { min-height:100vh; display:flex; align-items:center; justify-content:center; background:linear-gradient(135deg,#1e3a5f 0%,#2c5282 100%); padding:20px; }
-    .login-container { background:#fff; border-radius:12px; box-shadow:0 10px 40px rgba(0,0,0,.2); padding:40px 32px; width:100%; max-width:400px; }
-    .logo { text-align:center; margin-bottom:24px; }
-    .logo h1 { font-size:22px; color:#1e3a5f; font-weight:700; }
-    .logo p { font-size:13px; color:#718096; margin-top:4px; }
-    .form-group { margin-bottom:18px; }
-    label { display:block; margin-bottom:6px; font-size:14px; color:#2d3748; font-weight:600; }
-    input[type="text"], input[type="password"] { width:100%; padding:12px 14px; border:1.5px solid #e2e8f0; border-radius:8px; font-size:15px; }
-    input:focus { outline:none; border-color:#2c5282; }
-    .login-btn { width:100%; padding:13px; background:#2c5282; color:#fff; border:none; border-radius:8px; font-size:16px; font-weight:600; cursor:pointer; margin-top:8px; }
-    .login-btn:hover:not(:disabled) { background:#1e3a5f; }
-    .login-btn:disabled { opacity:.7; cursor:not-allowed; }
-    .error-msg { color:#e53e3e; font-size:13px; margin-top:12px; text-align:center; min-height:18px; }
-  </style>
+    await signInWithEmailAndPassword(auth, userData.email, password);
+    sessionStorage.setItem("employeeId", employeeId || "");
+    window.location.href = "dashboard.html";
+
+  } catch (error) {
+    let msg = "An error occurred while signing in.";
+    if (error.code === "auth/invalid-credential" || error.code === "auth/wrong-password") {
+      msg = "Incorrect username or password.";
+    }
+    errorMsg.textContent = msg;
+    resetBtn();
+  }
+
+  function resetBtn() {
+    loginBtn.disabled = false;
+    loginBtn.textContent = "Sign In";
+  }
+});
+
+// Show/hide Employee ID field based on username lookup (optional live check)
+usernameInput.addEventListener("blur", async () => {
+  const username = usernameInput.value.trim();
+  if (!username) return;
+  const q = query(collection(db, "users"), where("username", "==", username));
+  const snap = await getDocs(q);
+  if (!snap.empty) {
+    const role = snap.docs[0].data().role;
+    const needsId = ["weighbridge", "loading", "warehouse"].includes(role);
+    employeeIdGroup.style.display = needsId ? "block" : "none";
+    employeeIdInput.required = needsId;
+  }
+});
+</script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI',Tahoma,Arial,sans-serif; }
+body { min-height:100vh; display:flex; align-items:center; justify-content:center; background:linear-gradient(135deg,#1e3a5f 0%,#2c5282 100%); padding:20px; }
+.login-container { background:#fff; border-radius:12px; box-shadow:0 10px 40px rgba(0,0,0,.2); padding:40px 32px; width:100%; max-width:400px; }
+.logo { text-align:center; margin-bottom:24px; }
+.logo h1 { font-size:22px; color:#1e3a5f; font-weight:700; }
+.logo p { font-size:13px; color:#718096; margin-top:4px; }
+.form-group { margin-bottom:18px; }
+label { display:block; margin-bottom:6px; font-size:14px; color:#2d3748; font-weight:600; }
+input[type="text"], input[type="password"] { width:100%; padding:12px 14px; border:1.5px solid #e2e8f0; border-radius:8px; font-size:15px; }
+input:focus { outline:none; border-color:#2c5282; }
+.login-btn { width:100%; padding:13px; background:#2c5282; color:#fff; border:none; border-radius:8px; font-size:16px; font-weight:600; cursor:pointer; margin-top:8px; }
+.login-btn:hover:not(:disabled) { background:#1e3a5f; }
+.login-btn:disabled { opacity:.7; cursor:not-allowed; }
+.error-msg { color:#e53e3e; font-size:13px; margin-top:12px; text-align:center; min-height:18px; }
+</style>
 </head>
 <body>
   <div class="login-container">
     <div class="logo">
-      <h1>Weighbridge System</h1>
-      <p>Weight Management System</p>
+      <h1>Logistics System</h1>
+      <p>Weighbridge · Loading · Warehouse</p>
     </div>
     <form id="loginForm">
       <div class="form-group">
         <label for="username">Username</label>
-        <input type="text" id="username" required autocomplete="username" placeholder="e.g. ali.admin">
+        <input type="text" id="username" required autocomplete="username" placeholder="e.g. ali.wb">
+      </div>
+      <div class="form-group" id="employeeIdGroup" style="display:none;">
+        <label for="employeeId">Employee ID</label>
+        <input type="text" id="employeeId" placeholder="e.g. 105">
       </div>
       <div class="form-group">
         <label for="password">Password</label>
