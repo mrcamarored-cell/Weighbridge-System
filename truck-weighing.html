@@ -16,6 +16,8 @@ let currentUser, currentProfile;
 requireAuth((user, profile) => {
   if (!requireRole(profile, ["weighbridge", "admin"])) return;
   currentUser = user; currentProfile = profile;
+  const empName = sessionStorage.getItem("employeeName");
+  if (empName) document.getElementById("operatorName").textContent = "Operator: " + empName;
   document.getElementById("loadingScreen").style.display = "none";
   document.getElementById("mainContent").style.display = "block";
   loadBagWeight();
@@ -153,7 +155,7 @@ document.getElementById("truckInForm").addEventListener("submit", async (e) => {
       netWeight: net,
       transporter,
       status: "Truck In",
-      truckInBy: currentProfile.name || currentUser.email,
+      truckInBy: sessionStorage.getItem("employeeName") || currentProfile.name || currentUser.email,
       truckInAt: serverTimestamp(),
       createdAt: serverTimestamp()
     });
@@ -212,7 +214,7 @@ document.getElementById("confirmOutBtn").addEventListener("click", async () => {
 
   await updateDoc(doc(db, "deliveries", docId), {
     status: "Truck Out",
-    truckOutBy: currentProfile.name || currentUser.email,
+    truckOutBy: sessionStorage.getItem("employeeName") || currentProfile.name || currentUser.email,
     truckOutAt: serverTimestamp()
   });
 
@@ -252,6 +254,7 @@ header h1{ font-size:17px; }
 <div id="mainContent">
   <header>
     <h1>⚖️ Weighbridge - Truck In / Out</h1>
+    <div id="operatorName" style="font-size:12px; opacity:.85;"></div>
     <div class="header-actions">
       <button id="backBtn">↩ Main Menu</button>
       <button id="logoutBtn">Sign Out</button>

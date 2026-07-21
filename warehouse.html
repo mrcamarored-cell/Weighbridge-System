@@ -10,6 +10,8 @@ import { requireAuth, requireRole, signOut, auth, db, collection, query, where, 
 
 requireAuth((user, profile) => {
   if (!requireRole(profile, ["warehouse", "admin"])) return;
+  const empName = sessionStorage.getItem("employeeName");
+  if (empName) document.getElementById("operatorName").textContent = "Operator: " + empName;
   document.getElementById("loadingScreen").style.display = "none";
   document.getElementById("mainContent").style.display = "block";
 });
@@ -85,6 +87,7 @@ header h1{ font-size:17px; }
 <div id="mainContent">
   <header>
     <h1>🏬 Warehouse Receiving</h1>
+    <div id="operatorName" style="font-size:12px; opacity:.85;"></div>
     <div class="header-actions">
       <button id="backBtn">↩ Main Menu</button>
       <button id="logoutBtn">Sign Out</button>

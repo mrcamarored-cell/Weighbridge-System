@@ -40,6 +40,7 @@ loginForm.addEventListener("submit", async (e) => {
 
     // Roles that require an Employee ID (weighbridge, loading, warehouse)
     const rolesRequiringId = ["weighbridge", "loading", "warehouse"];
+    let employeeName = "";
     if (rolesRequiringId.includes(userData.role)) {
       if (!employeeId) {
         errorMsg.textContent = "Employee ID is required for your department.";
@@ -49,10 +50,15 @@ loginForm.addEventListener("submit", async (e) => {
         errorMsg.textContent = "Incorrect Employee ID.";
         resetBtn(); return;
       }
+      // Look up the employee's display name from the "employees" list
+      const empQ = query(collection(db, "employees"), where("employeeId", "==", employeeId));
+      const empSnap = await getDocs(empQ);
+      employeeName = empSnap.empty ? employeeId : empSnap.docs[0].data().name;
     }
 
     await signInWithEmailAndPassword(auth, userData.email, password);
     sessionStorage.setItem("employeeId", employeeId || "");
+    sessionStorage.setItem("employeeName", employeeName || "");
     window.location.href = "dashboard.html";
 
   } catch (error) {

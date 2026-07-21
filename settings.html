@@ -94,6 +94,33 @@ document.getElementById("vesselForm").addEventListener("submit", async (e) => {
   document.getElementById("vesselForm").reset();
   loadVessels();
 });
+
+// ===== Employees (Employee ID -> Name) =====
+async function loadEmployees() {
+  const tbody = document.getElementById("employeeTbody");
+  const snap = await getDocs(collection(db, "employees"));
+  tbody.innerHTML = "";
+  if (snap.empty) { tbody.innerHTML = "<tr><td colspan='3'>No employees</td></tr>"; return; }
+  snap.forEach(d => {
+    const e = d.data();
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${e.employeeId}</td><td>${e.name}</td><td><button class="delE" data-id="${d.id}">🗑</button></td>`;
+    tbody.appendChild(tr);
+  });
+  document.querySelectorAll(".delE").forEach(btn => btn.addEventListener("click", async () => {
+    if (confirm("Delete this employee?")) { await deleteDoc(doc(db, "employees", btn.dataset.id)); loadEmployees(); }
+  }));
+}
+document.getElementById("employeeForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const employeeId = document.getElementById("employeeIdInput").value.trim();
+  const name = document.getElementById("employeeNameInput").value.trim();
+  if (!employeeId || !name) return;
+  await addDoc(collection(db, "employees"), { employeeId, name });
+  document.getElementById("employeeForm").reset();
+  loadEmployees();
+});
+loadEmployees();
 </script>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI',Tahoma,Arial,sans-serif; }
@@ -157,6 +184,15 @@ th,td{ padding:8px; text-align:left; border-bottom:1px solid #edf2f7; }
         <button type="submit">➕ Add</button>
       </form>
       <table><tbody id="vesselTbody"></tbody></table>
+    </div>
+    <div class="card">
+      <h2>Employees (ID → Name)</h2>
+      <form id="employeeForm" class="form-row">
+        <input type="text" id="employeeIdInput" placeholder="Employee ID" required>
+        <input type="text" id="employeeNameInput" placeholder="Employee Name" required>
+        <button type="submit">➕ Add</button>
+      </form>
+      <table><tbody id="employeeTbody"></tbody></table>
     </div>
   </div>
 </div>

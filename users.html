@@ -20,7 +20,7 @@ document.getElementById("logoutBtn").addEventListener("click", async () => { if(
 document.getElementById("backBtn").addEventListener("click", () => window.location.href = "dashboard.html");
 
 const roleLabels = {
-  weighbridge:"Weighbridge", loading:"Loading/Unloading", warehouse:"Warehouse",
+  weighbridge:"Weighbridge", loading:"Stevedore", warehouse:"Warehouse",
   supervisor:"Supervisor", viewer:"Viewer", admin:"Admin"
 };
 
@@ -129,7 +129,7 @@ th{ background:#f8fafc; color:#4a5568; }
           <select id="role" required>
             <option value="">Role...</option>
             <option value="weighbridge">Weighbridge</option>
-            <option value="loading">Loading/Unloading</option>
+            <option value="loading">Stevedore</option>
             <option value="warehouse">Warehouse</option>
             <option value="supervisor">Supervisor</option>
             <option value="viewer">Viewer</option>

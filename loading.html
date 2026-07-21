@@ -3,13 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Loading / Unloading</title>
+<title>Stevedore</title>
 <script type="module">
 import { requireAuth, requireRole, signOut, auth, db, collection, query, where, orderBy, limit, getDocs, updateDoc, doc }
   from "./firebase-config.js";
 
 requireAuth((user, profile) => {
   if (!requireRole(profile, ["loading", "admin"])) return;
+  const empName = sessionStorage.getItem("employeeName");
+  if (empName) document.getElementById("operatorName").textContent = "Operator: " + empName;
   document.getElementById("loadingScreen").style.display = "none";
   document.getElementById("mainContent").style.display = "block";
 });
@@ -87,7 +89,8 @@ header h1{ font-size:17px; }
 <div id="loadingScreen">Checking session...</div>
 <div id="mainContent">
   <header>
-    <h1>📦 Loading / Unloading</h1>
+    <h1>📦 Stevedore</h1>
+    <div id="operatorName" style="font-size:12px; opacity:.85;"></div>
     <div class="header-actions">
       <button id="backBtn">↩ Main Menu</button>
       <button id="logoutBtn">Sign Out</button>
