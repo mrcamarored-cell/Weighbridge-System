@@ -96,6 +96,7 @@ document.getElementById("vesselForm").addEventListener("submit", async (e) => {
 });
 
 // ===== Employees (Employee ID -> Name) =====
+const deptLabels = { weighbridge:"Weighbridge", loading:"Stevedore", warehouse:"Warehouse" };
 async function loadEmployees() {
   const tbody = document.getElementById("employeeTbody");
   const snap = await getDocs(collection(db, "employees"));
@@ -104,7 +105,7 @@ async function loadEmployees() {
   snap.forEach(d => {
     const e = d.data();
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${e.employeeId}</td><td>${e.name}</td><td><button class="delE" data-id="${d.id}">🗑</button></td>`;
+    tr.innerHTML = `<td>${e.employeeId}</td><td>${e.name}</td><td>${deptLabels[e.department] || e.department || "—"}</td><td><button class="delE" data-id="${d.id}">🗑</button></td>`;
     tbody.appendChild(tr);
   });
   document.querySelectorAll(".delE").forEach(btn => btn.addEventListener("click", async () => {
@@ -115,8 +116,9 @@ document.getElementById("employeeForm").addEventListener("submit", async (e) => 
   e.preventDefault();
   const employeeId = document.getElementById("employeeIdInput").value.trim();
   const name = document.getElementById("employeeNameInput").value.trim();
-  if (!employeeId || !name) return;
-  await addDoc(collection(db, "employees"), { employeeId, name });
+  const department = document.getElementById("employeeDeptInput").value;
+  if (!employeeId || !name || !department) { alert("Please fill in ID, Name and Department."); return; }
+  await addDoc(collection(db, "employees"), { employeeId, name, department });
   document.getElementById("employeeForm").reset();
   loadEmployees();
 });
@@ -190,6 +192,12 @@ th,td{ padding:8px; text-align:left; border-bottom:1px solid #edf2f7; }
       <form id="employeeForm" class="form-row">
         <input type="text" id="employeeIdInput" placeholder="Employee ID" required>
         <input type="text" id="employeeNameInput" placeholder="Employee Name" required>
+        <select id="employeeDeptInput" required>
+          <option value="">Department...</option>
+          <option value="weighbridge">Weighbridge</option>
+          <option value="loading">Stevedore</option>
+          <option value="warehouse">Warehouse</option>
+        </select>
         <button type="submit">➕ Add</button>
       </form>
       <table><tbody id="employeeTbody"></tbody></table>

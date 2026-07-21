@@ -6,7 +6,7 @@
 <title>User Management</title>
 <script type="module">
 import {
-  requireAuth, requireRole, signOut, auth, db, createUserWithEmailAndPassword,
+  requireAuth, requireRole, signOut, auth, db, createUserKeepingSession,
   collection, getDocs, deleteDoc, doc, getDoc, setDoc, updateDoc
 } from "./firebase-config.js";
 
@@ -109,8 +109,8 @@ document.getElementById("userForm").addEventListener("submit", async (e) => {
   const email = username.toLowerCase().replace(/\s+/g, "") + "@logistics.local";
 
   try {
-    const cred = await createUserWithEmailAndPassword(auth, email, password);
-    await setDoc(doc(db, "users", cred.user.uid), {
+    const uid = await createUserKeepingSession(email, password);
+    await setDoc(doc(db, "users", uid), {
       name, username, email, role, password, online: false
     });
     alert("✅ User created. Username: " + username);

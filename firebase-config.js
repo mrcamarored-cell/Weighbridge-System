@@ -1,5 +1,5 @@
 // Shared Firebase config + helpers used by every page
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import {
   getAuth, onAuthStateChanged, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
@@ -26,6 +26,21 @@ export {
   collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc,
   query, where, orderBy, limit, serverTimestamp, runTransaction, Timestamp, onSnapshot
 };
+
+// ===== Create a new auth user WITHOUT signing out the current admin =====
+// Uses a temporary secondary Firebase app so the admin's session stays intact.
+export async function createUserKeepingSession(email, password) {
+  const secondaryApp = initializeApp(firebaseConfig, "Secondary_" + Date.now());
+  const secondaryAuth = getAuth(secondaryApp);
+  try {
+    const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+    const uid = cred.user.uid;
+    await signOut(secondaryAuth);
+    return uid;
+  } finally {
+    await deleteApp(secondaryApp);
+  }
+}
 
 // ===== Generate a safe sequential Delivery No. using a Firestore transaction =====
 export async function generateDeliveryNo() {
