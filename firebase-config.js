@@ -42,6 +42,29 @@ export async function createUserKeepingSession(email, password) {
   }
 }
 
+// ===== Verify a supervisor/admin by username + password =====
+// Uses a temporary secondary Firebase app so the current operator's session is untouched.
+export async function verifySupervisor(username, password) {
+  const qy = query(collection(db, "users"), where("username", "==", username));
+  const snap = await getDocs(qy);
+  if (snap.empty) return { ok: false, reason: "Supervisor username not found." };
+  const u = snap.docs[0].data();
+  if (!["supervisor", "admin"].includes(u.role)) {
+    return { ok: false, reason: "This user is not a supervisor or admin." };
+  }
+  const secondaryApp = initializeApp(firebaseConfig, "Verify_" + Date.now());
+  const secondaryAuth = getAuth(secondaryApp);
+  try {
+    await signInWithEmailAndPassword(secondaryAuth, u.email, password);
+    await signOut(secondaryAuth);
+    return { ok: true, name: u.name || username };
+  } catch (e) {
+    return { ok: false, reason: "Incorrect supervisor password." };
+  } finally {
+    await deleteApp(secondaryApp);
+  }
+}
+
 // ===== Generate a safe sequential Delivery No. using a Firestore transaction =====
 export async function generateDeliveryNo() {
   const counterRef = doc(db, "counters", "deliveryNo");
