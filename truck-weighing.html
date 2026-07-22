@@ -8,7 +8,7 @@
 import {
   requireAuth, requireRole, signOut, auth, db,
   collection, doc, getDoc, getDocs, addDoc, updateDoc, query, where, orderBy, limit,
-  serverTimestamp, generateDeliveryNo, verifySupervisor, verifyPassword, reverseOneStep
+  serverTimestamp, generateDeliveryNo, verifySupervisor, verifyPassword, reverseOneStep, logAudit
 } from "./firebase-config.js";
 
 let currentUser, currentProfile;
@@ -20,6 +20,7 @@ requireAuth((user, profile) => {
   if (empName) document.getElementById("operatorName").textContent = "Operator: " + empName;
   document.getElementById("loadingScreen").style.display = "none";
   document.getElementById("mainContent").style.display = "block";
+  loadEditList();
 });
 
 document.getElementById("logoutBtn").addEventListener("click", async () => { if(confirm("Sign out?")){ await signOut(auth); window.location.href="index.html"; }});
@@ -39,6 +40,7 @@ function switchTab(which) {
     tabMap[k][1].style.display = k === which ? "block" : "none";
   }
   if (which === "out") loadPgiList();
+  if (which === "in") loadEditList();
 }
 
 // ================= TRUCK IN =================
@@ -375,11 +377,7 @@ document.getElementById("confirmOutBtn").addEventListener("click", async () => {
 document.getElementById("reverseBtn").addEventListener("click", async () => {
   if (!pgiDocId || !pgiData) { alert("Please select a truck first."); return; }
   const reason = document.getElementById("revReason").value.trim();
-  const pw = document.getElementById("revPass").value;
   if (!reason) { alert("Please enter a reason for the reverse."); return; }
-  if (!pw) { alert("Please enter your login password."); return; }
-  const v = await verifyPassword(currentUser.email, pw);
-  if (!v.ok) { alert(v.reason); return; }
   if (!confirm("Reverse this truck back to Truck In (undo Pick)? It will re-appear in the Stevedore list.")) return;
   const btn = document.getElementById("reverseBtn"); btn.disabled = true; btn.textContent = "Working...";
   try {
@@ -388,11 +386,122 @@ document.getElementById("reverseBtn").addEventListener("click", async () => {
     alert("✅ Reversed back to Truck In.");
     document.getElementById("outResultBox").style.display = "none";
     document.getElementById("searchOutForm").reset();
-    document.getElementById("revReason").value = ""; document.getElementById("revPass").value = "";
+    document.getElementById("revReason").value = "";
     pgiDocId = null; pgiData = null;
     loadPgiList();
   } catch (e) { alert("Error: " + e.message); }
   finally { btn.disabled = false; btn.textContent = "↩ Reverse (back to Truck In)"; }
+});
+
+// ================= EDIT / DELETE an existing Truck In =================
+let editDocId = null, editData = null, editUnit = "MT", editEmptyKg = null;
+
+async function loadEditList() {
+  const body = document.getElementById("editListBody");
+  if (!body) return;
+  body.innerHTML = "<tr><td colspan='3' style='padding:8px;'>Loading...</td></tr>";
+  document.getElementById("editBox").style.display = "none";
+  editDocId = null; editData = null;
+  try {
+    const snap = await getDocs(query(collection(db, "deliveries"), orderBy("createdAt", "desc"), limit(150)));
+    const rows = [];
+    snap.forEach(dd => { const r = dd.data(); if (r.status === "Truck In") rows.push({ id: dd.id, ...r }); });
+    if (rows.length === 0) { body.innerHTML = "<tr><td colspan='3' style='padding:8px;color:#718096;'>No Truck In deliveries.</td></tr>"; return; }
+    body.innerHTML = "";
+    rows.forEach(r => {
+      const tr = document.createElement("tr");
+      tr.style.cursor = "pointer";
+      tr.innerHTML =
+        `<td style="padding:8px;border-bottom:1px solid #edf2f7;">${r.deliveryNo || ""}</td>` +
+        `<td style="padding:8px;border-bottom:1px solid #edf2f7;">${r.truckNumber || ""}</td>` +
+        `<td style="padding:8px;border-bottom:1px solid #edf2f7;color:#2c5282;font-weight:700;">Edit ›</td>`;
+      tr.addEventListener("click", () => selectEdit(r));
+      body.appendChild(tr);
+    });
+  } catch (err) { console.error(err); body.innerHTML = "<tr><td colspan='3' style='padding:8px;color:#c53030;'>Could not load list.</td></tr>"; }
+}
+
+function selectEdit(r) {
+  editDocId = r.id; editData = r;
+  editEmptyKg = Number(r.emptyWeight) || 0;
+  editUnit = "MT";
+  document.getElementById("editDnView").textContent = r.deliveryNo || "";
+  document.getElementById("editTruckNo").value = r.truckNumber || "";
+  document.getElementById("editMethod").value = r.weighingMethod || "Actual";
+  document.getElementById("editUnitMt").classList.add("active");
+  document.getElementById("editUnitKg").classList.remove("active");
+  renderEditEmpty();
+  document.getElementById("editDeleteWrap").style.display = (currentProfile.role === "admin") ? "block" : "none";
+  document.getElementById("editReason").value = "";
+  document.getElementById("editPassword").value = "";
+  const box = document.getElementById("editBox");
+  box.style.display = "block";
+  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function renderEditEmpty() {
+  const el = document.getElementById("editEmpty");
+  document.getElementById("editUnitLabel").textContent = editUnit;
+  if (editEmptyKg === null || isNaN(editEmptyKg)) { el.value = ""; return; }
+  el.value = editUnit === "MT" ? (editEmptyKg / 1000) : editEmptyKg;
+}
+document.getElementById("editEmpty").addEventListener("input", () => {
+  const v = parseFloat(document.getElementById("editEmpty").value);
+  editEmptyKg = isNaN(v) ? null : (editUnit === "MT" ? v * 1000 : v);
+});
+document.getElementById("editUnitMt").addEventListener("click", () => { editUnit = "MT"; document.getElementById("editUnitMt").classList.add("active"); document.getElementById("editUnitKg").classList.remove("active"); renderEditEmpty(); });
+document.getElementById("editUnitKg").addEventListener("click", () => { editUnit = "KG"; document.getElementById("editUnitKg").classList.add("active"); document.getElementById("editUnitMt").classList.remove("active"); renderEditEmpty(); });
+
+document.getElementById("editSearchForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  let val = document.getElementById("editDn").value.trim();
+  if (!val) return;
+  val = "DN-" + val.replace(/^dn-?/i, "");
+  const snap = await getDocs(query(collection(db, "deliveries"), where("deliveryNo", "==", val), limit(1)));
+  if (snap.empty) { alert("Delivery No. " + val + " not found."); return; }
+  const r = { id: snap.docs[0].id, ...snap.docs[0].data() };
+  if (r.status !== "Truck In") { alert("Only Truck In deliveries can be edited/deleted here. This delivery is: " + r.status); return; }
+  selectEdit(r);
+});
+
+document.getElementById("saveEditBtn").addEventListener("click", async () => {
+  if (!editDocId) return;
+  const truckNumber = document.getElementById("editTruckNo").value.trim();
+  const method = document.getElementById("editMethod").value;
+  if (!truckNumber) { alert("Please enter the truck number."); return; }
+  if (editEmptyKg === null || editEmptyKg <= 0) { alert("Please enter a valid empty weight."); return; }
+  const btn = document.getElementById("saveEditBtn"); btn.disabled = true; btn.textContent = "Saving...";
+  try {
+    await updateDoc(doc(db, "deliveries", editDocId), { truckNumber, emptyWeight: editEmptyKg, weighingMethod: method });
+    await logAudit({ deliveryNo: editData.deliveryNo, truckNumber, action: "Edit Truck In", fromStatus: "Truck In", toStatus: "Truck In", byUser: sessionStorage.getItem("employeeName") || currentProfile.name || currentUser.email, reason: "" });
+    alert("✅ Truck In details updated.");
+    document.getElementById("editBox").style.display = "none";
+    loadEditList();
+  } catch (e) { alert("Error: " + e.message); }
+  finally { btn.disabled = false; btn.textContent = "💾 Save Changes"; }
+});
+
+document.getElementById("editDeleteBtn").addEventListener("click", async () => {
+  if (!editDocId || !editData) return;
+  if (currentProfile.role !== "admin") { alert("Only an admin can delete."); return; }
+  if (editData.status !== "Truck In") { alert("Only a Truck In (current) record can be deleted."); return; }
+  const reason = document.getElementById("editReason").value.trim();
+  const pw = document.getElementById("editPassword").value;
+  if (!reason) { alert("Please enter a reason for deleting."); return; }
+  if (!pw) { alert("Please enter your login password."); return; }
+  const v = await verifyPassword(currentUser.email, pw);
+  if (!v.ok) { alert(v.reason); return; }
+  if (!confirm("Permanently DELETE this Truck In record? Only the current record is removed; history is kept.")) return;
+  const btn = document.getElementById("editDeleteBtn"); btn.disabled = true; btn.textContent = "Working...";
+  try {
+    const byUser = sessionStorage.getItem("employeeName") || currentProfile.name || currentUser.email;
+    await reverseOneStep(editDocId, editData, reason, byUser); // Truck In -> deleted
+    alert("✅ Truck In record deleted.");
+    document.getElementById("editBox").style.display = "none";
+    editDocId = null; editData = null;
+    loadEditList();
+  } catch (e) { alert("Error: " + e.message); }
+  finally { btn.disabled = false; btn.textContent = "🗑 Delete (admin)"; }
 });
 
 </script>
@@ -503,6 +612,52 @@ header h1{ font-size:17px; }
           <button type="submit" id="saveInBtn">💾 Save Truck In</button>
         </div>
       </form>
+
+      <div class="card">
+        <h2>Edit / Delete an existing Truck In</h2>
+        <p style="font-size:12px; color:#718096; margin-bottom:12px;">Select a truck currently at Truck In to correct its details — tap it below or enter its DN.</p>
+        <form id="editSearchForm" class="grid" style="margin-bottom:12px;">
+          <div class="form-group"><label>Delivery No. (DN)</label><input type="text" id="editDn" placeholder="e.g. DN-1001"></div>
+          <button type="submit" style="align-self:end; padding:10px; background:#2c5282; color:#fff; border:none; border-radius:7px; cursor:pointer; font-weight:700;">🔍 Find</button>
+        </form>
+        <div style="overflow-x:auto;">
+          <table style="width:100%; border-collapse:collapse; font-size:13px; min-width:360px;">
+            <thead><tr>
+              <th style="text-align:left; padding:8px; background:#f8fafc; color:#4a5568;">DN</th>
+              <th style="text-align:left; padding:8px; background:#f8fafc; color:#4a5568;">Truck</th>
+              <th style="padding:8px; background:#f8fafc;"></th>
+            </tr></thead>
+            <tbody id="editListBody"></tbody>
+          </table>
+        </div>
+
+        <div id="editBox" style="display:none; border-top:1px solid #edf2f7; margin-top:14px; padding-top:14px;">
+          <div class="result-row"><span>Delivery No.</span><b id="editDnView"></b></div>
+          <div style="display:flex; gap:8px; align-items:center; margin:12px 0 8px;">
+            <span style="font-size:13px; font-weight:600; color:#2d3748;">Weight unit:</span>
+            <button type="button" id="editUnitMt" class="unit-btn active">MT</button>
+            <button type="button" id="editUnitKg" class="unit-btn">KG</button>
+          </div>
+          <div class="grid">
+            <div class="form-group"><label>Truck No.</label><input type="text" id="editTruckNo"></div>
+            <div class="form-group"><label>Empty Weight (<span id="editUnitLabel">MT</span>)</label><input type="number" id="editEmpty" step="any"></div>
+            <div class="form-group"><label>Weighing Method</label>
+              <select id="editMethod">
+                <option value="Actual">Actual (weigh loaded truck at PGI)</option>
+                <option value="Theoretical">Theoretical (by bag count)</option>
+              </select>
+            </div>
+          </div>
+          <button id="saveEditBtn" style="width:100%; padding:12px; background:#2c5282; color:#fff; border:none; border-radius:8px; font-weight:700; cursor:pointer; margin-top:12px;">💾 Save Changes</button>
+
+          <div id="editDeleteWrap" style="display:none; border-top:1px solid #fed7d7; margin-top:16px; padding-top:14px;">
+            <p style="font-size:12px; color:#c53030; font-weight:600; margin-bottom:10px;">Admin only: permanently delete this Truck In record (current record only; history is kept).</p>
+            <div class="form-group"><label>Reason for delete *</label><input type="text" id="editReason"></div>
+            <div class="form-group" style="margin-top:10px;"><label>Your login password *</label><input type="password" id="editPassword"></div>
+            <button id="editDeleteBtn" style="width:100%; padding:12px; background:#c53030; color:#fff; border:none; border-radius:8px; font-weight:700; cursor:pointer; margin-top:12px;">🗑 Delete (admin)</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div id="panelOut" style="display:none;">
@@ -571,9 +726,8 @@ header h1{ font-size:17px; }
         <button id="confirmOutBtn">✔ Confirm PGI</button>
 
         <div style="border-top:1px solid #edf2f7; margin-top:18px; padding-top:14px;">
-          <p style="font-size:12px; color:#718096; margin-bottom:10px;">Wrong info? Reverse this truck back to <b>Truck In</b> (undo Pick) so the Stevedore can fix it. Requires a reason and your login password.</p>
+          <p style="font-size:12px; color:#718096; margin-bottom:10px;">Wrong info? Reverse this truck back to <b>Truck In</b> (undo Pick) so the Stevedore can fix it. A reason is required.</p>
           <div class="form-group"><label>Reason for reverse *</label><input type="text" id="revReason"></div>
-          <div class="form-group" style="margin-top:10px;"><label>Your login password *</label><input type="password" id="revPass"></div>
           <button id="reverseBtn" style="width:100%; padding:12px; background:#c53030; color:#fff; border:none; border-radius:8px; font-weight:700; cursor:pointer; margin-top:12px;">↩ Reverse (back to Truck In)</button>
         </div>
       </div>

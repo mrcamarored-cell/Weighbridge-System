@@ -119,11 +119,7 @@ document.getElementById("confirmReceiptBtn").addEventListener("click", async () 
 document.getElementById("reverseBtn").addEventListener("click", async () => {
   if (!selectedDocId || !selectedData) { alert("Please select a truck first."); return; }
   const reason = document.getElementById("revReason").value.trim();
-  const pw = document.getElementById("revPass").value;
   if (!reason) { alert("Please enter a reason for the reverse."); return; }
-  if (!pw) { alert("Please enter your login password."); return; }
-  const v = await verifyPassword(currentUser.email, pw);
-  if (!v.ok) { alert(v.reason); return; }
   if (!confirm("Reverse this truck back to Loaded (undo PGI)? It will re-appear in the weighbridge PGI list.")) return;
   const btn = document.getElementById("reverseBtn"); btn.disabled = true; btn.textContent = "Working...";
   try {
@@ -132,7 +128,7 @@ document.getElementById("reverseBtn").addEventListener("click", async () => {
     alert("✅ Reversed back to Loaded.");
     document.getElementById("resultBox").style.display = "none";
     document.getElementById("searchForm").reset();
-    document.getElementById("revReason").value = ""; document.getElementById("revPass").value = "";
+    document.getElementById("revReason").value = "";
     selectedDocId = null; selectedData = null;
     loadWarehouseList();
   } catch (e) { alert("Error: " + e.message); }
@@ -209,9 +205,8 @@ header h1{ font-size:17px; }
       <button id="confirmReceiptBtn">✔ Confirm Receipt (Received)</button>
 
       <div style="border-top:1px solid #edf2f7; margin-top:18px; padding-top:14px;">
-        <p style="font-size:12px; color:#718096; margin-bottom:10px;">Bags don't match? Reverse the truck back to <b>Loaded</b> (undo PGI) so it can be re-checked. Requires a reason and your login password.</p>
+        <p style="font-size:12px; color:#718096; margin-bottom:10px;">Bags don't match? Reverse the truck back to <b>Loaded</b> (undo PGI) so it can be re-checked. A reason is required.</p>
         <div class="form-group"><label>Reason for reverse *</label><input type="text" id="revReason"></div>
-        <div class="form-group" style="margin-top:10px;"><label>Your login password *</label><input type="password" id="revPass"></div>
         <button id="reverseBtn" style="width:100%; padding:12px; background:#c53030; color:#fff; border:none; border-radius:8px; font-weight:700; cursor:pointer; margin-top:12px;">↩ Reverse (back to Loaded)</button>
       </div>
     </div>
