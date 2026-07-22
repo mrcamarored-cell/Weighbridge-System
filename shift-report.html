@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shift Loading Report</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script type="module">
+import { requireAuth, requireRole, signOut, auth, db, collection, query, orderBy, getDocs, addDoc, deleteDoc, doc, serverTimestamp, Timestamp }
+  from "./firebase-config.js";
+
+requireAuth((user, profile) => {
+  if (!requireRole(profile, ["loading", "admin"])) return;
+  const empName = sessionStorage.getItem("employeeName");
+  if (empName) document.getElementById("operatorName").textContent = "Operator: " + empName;
+  document.getElementById("loadingScreen").style.display = "none";
+  document.getElementById("mainContent").style.display = "block";
+  loadMeta();
+  loadNotesList();
+});
+document.getElementById("logoutBtn").addEventListener("click", async () => { if(confirm("Sign out?")){ await signOut(auth); window.location.href="index.html"; }});
+document.getElementById("backBtn").addEventListener("click", () => window.location.href = "dashboard.html");
+
+// ===== Tabs =====
+const tabReport = document.getElementById("tabReport");
+const tabNotes = document.getElementById("tabNotes");
+const panelReport = document.getElementById("panelReport");
+const panelNotes = document.getElementById("panelNotes");
+tabReport.addEventListener("click", () => sw("report"));
+tabNotes.addEventListener("click", () => sw("notes"));
+function sw(w) {
+  tabReport.classList.toggle("active", w === "report");
+  tabNotes.classList.toggle("active", w === "notes");
+  panelReport.style.display = w === "report" ? "block" : "none";
+  panelNotes.style.display = w === "notes" ? "block" : "none";
+}
+
+let holdsData = [];
+let currentVessel = "";
+let lastReport = null;
+
+async function loadMeta() {
+  const sSnap = await getDocs(collection(db, "settings"));
+  if (!sSnap.empty) currentVessel = sSnap.docs[0].data().currentVessel || "";
+  const hSnap = await getDocs(collection(db, "holds"));
+  holdsData = [];
+  hSnap.forEach(d => holdsData.push(d.data()));
+  holdsData.sort((a, b) => String(a.holdNo).localeCompare(String(b.holdNo), undefined, { numeric: true }));
+  const sel = document.getElementById("remarkHold");
+  sel.innerHTML = '<option value="">General (no hold)</option>';
+  holdsData.forEach(h => { const o = document.createElement("option"); o.value = h.holdNo; o.textContent = "Hold " + h.holdNo; sel.appendChild(o); });
+}
+
+// ===== Generate report =====
+document.getElementById("reportFilterForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const fromDate = document.getElementById("fromDate").value;
+  const toDate = document.getElementById("toDate").value;
+  if (!fromDate || !toDate) { alert("Please select the date range."); return; }
+  const fromTime = document.getElementById("fromTime").value || "00:00";
+  const toTime = document.getElementById("toTime").value || "23:59";
+  const fromTs = new Date(fromDate + "T" + fromTime + ":00").getTime();
+  const toTs = new Date(toDate + "T" + toTime + ":59").getTime();
+
+  const dSnap = await getDocs(collection(db, "deliveries"));
+  const shift = {}, cum = {};
+  dSnap.forEach(dd => {
+    const r = dd.data();
+    if (r.status === "Reversed" || !r.hold) return;
+    if (!r.pickedAt || typeof r.pickedAt.toMillis !== "function") return;
+    const t = r.pickedAt.toMillis();
+    const bags = Number(r.numberOfBags) || 0;
+    if (t <= toTs) cum[r.hold] = (cum[r.hold] || 0) + bags;
+    if (t >= fromTs && t <= toTs) shift[r.hold] = (shift[r.hold] || 0) + bags;
+  });
+
+  const rows = [];
+  const tot = { sb: 0, sw: 0, gb: 0, gw: 0, st: 0, bb: 0, bw: 0 };
+  holdsData.forEach(h => {
+    const perBagKg = (Number(h.bags) > 0) ? (Number(h.weightKg) / Number(h.bags)) : 0;
+    const sb = shift[h.holdNo] || 0;
+    const gb = cum[h.holdNo] || 0;
+    const sw = sb * perBagKg / 1000;
+    const gw = gb * perBagKg / 1000;
+    const st = Number(h.weightKg) / 1000;
+    const bb = Number(h.bags) - gb;
+    const bw = st - gw;
+    rows.push([h.holdNo, sb, sw.toFixed(2), gb, gw.toFixed(2), st.toFixed(2), bb, bw.toFixed(2)]);
+    tot.sb += sb; tot.sw += sw; tot.gb += gb; tot.gw += gw; tot.st += st; tot.bb += bb; tot.bw += bw;
+  });
+  const totalsRow = ["TOTAL", tot.sb, tot.sw.toFixed(2), tot.gb, tot.gw.toFixed(2), tot.st.toFixed(2), tot.bb, tot.bw.toFixed(2)];
+
+  // Notes in range
+  const nSnap = await getDocs(collection(db, "shiftNotes"));
+  const notes = [];
+  nSnap.forEach(nd => {
+    const n = nd.data();
+    const t = (n.startTs && n.startTs.toMillis) ? n.startTs.toMillis()
+            : (n.date ? new Date(n.date + "T" + (n.timeFrom || "00:00") + ":00").getTime() : null);
+    if (t === null || (t >= fromTs && t <= toTs)) notes.push(n);
+  });
+  notes.sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
+
+  lastReport = { vessel: currentVessel, dateRange: fromDate + " → " + toDate, timeRange: fromTime + " → " + toTime, rows, totalsRow, notes };
+  renderPreview(lastReport);
+  document.getElementById("downloadBtn").disabled = false;
+});
+
+function renderPreview(rep) {
+  document.getElementById("pvVessel").textContent = rep.vessel || "—";
+  document.getElementById("pvDate").textContent = rep.dateRange;
+  document.getElementById("pvTime").textContent = rep.timeRange;
+  const c = "padding:9px;border-bottom:1px solid #edf2f7;text-align:center;";
+  const body = document.getElementById("reportBody");
+  body.innerHTML = "";
+  if (rep.rows.length === 0) { body.innerHTML = `<tr><td colspan='8' style='${c}'>No holds defined.</td></tr>`; }
+  else {
+    rep.rows.forEach(r => { const tr = document.createElement("tr"); tr.innerHTML = r.map(v => `<td style="${c}">${v}</td>`).join(""); body.appendChild(tr); });
+    const ft = document.createElement("tr"); ft.style.fontWeight = "700"; ft.style.background = "#f8fafc";
+    ft.innerHTML = rep.totalsRow.map(v => `<td style="${c}">${v}</td>`).join(""); body.appendChild(ft);
+  }
+  const nb = document.getElementById("pvNotesBody");
+  nb.innerHTML = "";
+  if (rep.notes.length === 0) { nb.innerHTML = `<tr><td colspan='5' style='padding:9px;border-bottom:1px solid #edf2f7;'>No delays or remarks in this period.</td></tr>`; }
+  else rep.notes.forEach(n => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td style="${c}">${n.type || ""}</td><td style="${c}">${n.hold || "General"}</td><td style="${c}">${n.date || ""}</td><td style="${c}">${(n.timeFrom || "") + " - " + (n.timeTo || "")}</td><td style="padding:9px;border-bottom:1px solid #edf2f7;">${n.text || ""}</td>`;
+    nb.appendChild(tr);
+  });
+  document.getElementById("reportPreview").style.display = "block";
+}
+
+// ===== Download PDF =====
+document.getElementById("downloadBtn").addEventListener("click", () => {
+  if (!lastReport) return;
+  const { jsPDF } = window.jspdf;
+  const docp = new jsPDF({ orientation: "landscape" });
+  const pw = docp.internal.pageSize.getWidth();
+
+  docp.setFontSize(16); docp.setFont(undefined, "bold");
+  docp.text("Loading Report", pw / 2, 14, { align: "center" });
+  docp.setFontSize(10); docp.setFont(undefined, "normal");
+  docp.text("Vessel: " + (lastReport.vessel || "—"), 14, 24);
+  docp.text("Date: " + lastReport.dateRange, 14, 30);
+  docp.text("Time: " + lastReport.timeRange, 14, 36);
+
+  docp.autoTable({
+    startY: 42,
+    head: [["Hold No.", "Loaded Bags", "Load Qty (MT)", "Grand Total Bags", "Grand Total (MT)", "Stowage (MT)", "Balance Bags", "Balance (MT)"]],
+    body: lastReport.rows,
+    foot: [lastReport.totalsRow],
+    styles: { fontSize: 9, halign: "center" },
+    headStyles: { fillColor: [44, 82, 130] },
+    footStyles: { fillColor: [226, 232, 240], textColor: 20, fontStyle: "bold" }
+  });
+
+  docp.addPage();
+  docp.setFontSize(16); docp.setFont(undefined, "bold");
+  docp.text("Delays & Remarks", pw / 2, 14, { align: "center" });
+  const noteBody = lastReport.notes.map(n => [n.type || "", n.hold || "General", n.date || "", (n.timeFrom || "") + " - " + (n.timeTo || ""), n.text || ""]);
+  docp.autoTable({
+    startY: 22,
+    head: [["Type", "Hold", "Date", "Time", "Details"]],
+    body: noteBody.length ? noteBody : [["—", "—", "—", "—", "No delays or remarks in this period"]],
+    styles: { fontSize: 9 },
+    headStyles: { fillColor: [44, 82, 130] },
+    columnStyles: { 4: { cellWidth: 130 } }
+  });
+
+  docp.save("Loading_Report_" + lastReport.dateRange.split(" ")[0] + ".pdf");
+});
+
+// ===== Delay & Remark form =====
+document.getElementById("remarkForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const type = document.getElementById("remarkType").value;
+  const hold = document.getElementById("remarkHold").value;
+  const text = document.getElementById("remarkText").value.trim();
+  const date = document.getElementById("remarkDate").value;
+  const timeFrom = document.getElementById("remarkTimeFrom").value;
+  const timeTo = document.getElementById("remarkTimeTo").value;
+  if (!text) { alert("Please write the details."); return; }
+  if (!date) { alert("Please select the date."); return; }
+  const startTs = Timestamp.fromDate(new Date(date + "T" + (timeFrom || "00:00") + ":00"));
+  await addDoc(collection(db, "shiftNotes"), {
+    type, hold, text, date, timeFrom, timeTo, startTs,
+    createdBy: sessionStorage.getItem("employeeName") || "", createdAt: serverTimestamp()
+  });
+  document.getElementById("remarkForm").reset();
+  loadNotesList();
+  alert("✅ Entry saved.");
+});
+
+async function loadNotesList() {
+  const body = document.getElementById("notesListBody");
+  const snap = await getDocs(query(collection(db, "shiftNotes"), orderBy("createdAt", "desc")));
+  const c = "padding:9px;border-bottom:1px solid #edf2f7;";
+  body.innerHTML = "";
+  if (snap.empty) { body.innerHTML = `<tr><td colspan='6' style='${c}color:#718096;'>No entries yet.</td></tr>`; return; }
+  snap.forEach(d => {
+    const n = d.data();
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td style="${c}">${n.type || ""}</td><td style="${c}">${n.hold || "General"}</td><td style="${c}">${n.date || ""}</td><td style="${c}">${(n.timeFrom || "") + " - " + (n.timeTo || "")}</td><td style="${c}">${n.text || ""}</td><td style="${c}"><button class="delN" data-id="${d.id}" style="background:#fed7d7;border:none;padding:4px 8px;border-radius:5px;cursor:pointer;">🗑</button></td>`;
+    body.appendChild(tr);
+  });
+  document.querySelectorAll(".delN").forEach(b => b.addEventListener("click", async () => {
+    if (confirm("Delete this entry?")) { await deleteDoc(doc(db, "shiftNotes", b.dataset.id)); loadNotesList(); }
+  }));
+}
+</script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI',Tahoma,Arial,sans-serif; }
+body { background:#f4f6f9; min-height:100vh; }
+#loadingScreen { display:flex; align-items:center; justify-content:center; height:100vh; color:#718096; }
+#mainContent { display:none; }
+header { background:linear-gradient(135deg,#1e3a5f,#2c5282); color:#fff; padding:14px 24px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; }
+header h1{ font-size:17px; }
+.header-actions button{ background:rgba(255,255,255,.15); color:#fff; border:1px solid rgba(255,255,255,.4); padding:7px 14px; border-radius:6px; cursor:pointer; font-size:13px; margin-left:8px; }
+.container{ max-width:1100px; margin:24px auto; padding:0 16px; }
+.tabs{ display:flex; gap:8px; margin-bottom:16px; }
+.tabs button{ flex:1; padding:12px; border:none; background:#e2e8f0; color:#4a5568; border-radius:8px; cursor:pointer; font-weight:700; font-size:14px; }
+.tabs button.active{ background:#2c5282; color:#fff; }
+.card{ background:#fff; border-radius:10px; padding:22px; box-shadow:0 2px 8px rgba(0,0,0,.06); margin-bottom:20px; }
+.card h2{ font-size:16px; color:#1e3a5f; margin-bottom:14px; }
+.form-row{ display:flex; gap:12px; flex-wrap:wrap; align-items:end; }
+.form-group{ flex:1; min-width:140px; }
+.form-group label{ display:block; font-size:12px; font-weight:600; color:#4a5568; margin-bottom:4px; }
+.form-group input, .form-group select, .form-group textarea{ width:100%; padding:10px 12px; border:1.5px solid #e2e8f0; border-radius:7px; font-size:14px; }
+.btn{ padding:11px 20px; background:#2c5282; color:#fff; border:none; border-radius:7px; cursor:pointer; font-weight:700; }
+.btn.green{ background:#22543d; }
+.btn:disabled{ opacity:.5; cursor:not-allowed; }
+table{ width:100%; border-collapse:collapse; font-size:13px; }
+th{ background:#f8fafc; color:#4a5568; padding:9px; text-align:center; }
+.report-meta{ display:flex; gap:24px; flex-wrap:wrap; font-size:14px; margin-bottom:14px; }
+.report-meta b{ color:#1e3a5f; }
+</style>
+</head>
+<body>
+<div id="loadingScreen">Checking session...</div>
+<div id="mainContent">
+  <header>
+    <h1>📝 Shift Loading Report</h1>
+    <div id="operatorName" style="font-size:12px; opacity:.85;"></div>
+    <div class="header-actions">
+      <button id="backBtn">↩ Main Menu</button>
+      <button id="logoutBtn">Sign Out</button>
+    </div>
+  </header>
+  <div class="container">
+    <div class="tabs">
+      <button id="tabReport" class="active">📄 Loading Report</button>
+      <button id="tabNotes">⏱️ Delay &amp; Remark</button>
+    </div>
+
+    <!-- ===== REPORT TAB ===== -->
+    <div id="panelReport">
+      <div class="card">
+        <h2>Filter by Date &amp; Time</h2>
+        <form id="reportFilterForm" class="form-row">
+          <div class="form-group"><label>From Date</label><input type="date" id="fromDate" required></div>
+          <div class="form-group"><label>From Time</label><input type="time" id="fromTime"></div>
+          <div class="form-group"><label>To Date</label><input type="date" id="toDate" required></div>
+          <div class="form-group"><label>To Time</label><input type="time" id="toTime"></div>
+          <button type="submit" class="btn">🔍 Generate</button>
+        </form>
+      </div>
+
+      <div class="card" id="reportPreview" style="display:none;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
+          <h2 style="margin:0;">Loading Report</h2>
+          <button id="downloadBtn" class="btn green" disabled>⬇ Download PDF</button>
+        </div>
+        <div class="report-meta">
+          <div>Vessel: <b id="pvVessel">—</b></div>
+          <div>Date: <b id="pvDate">—</b></div>
+          <div>Time: <b id="pvTime">—</b></div>
+        </div>
+        <div style="overflow-x:auto;">
+          <table style="min-width:820px;">
+            <thead><tr>
+              <th>Hold No.</th><th>Loaded Bags</th><th>Load Qty (MT)</th>
+              <th>Grand Total Bags</th><th>Grand Total (MT)</th><th>Stowage (MT)</th>
+              <th>Balance Bags</th><th>Balance (MT)</th>
+            </tr></thead>
+            <tbody id="reportBody"></tbody>
+          </table>
+        </div>
+
+        <h2 style="margin-top:24px;">Delays &amp; Remarks</h2>
+        <div style="overflow-x:auto;">
+          <table style="min-width:640px;">
+            <thead><tr>
+              <th style="text-align:left;">Type</th><th>Hold</th><th>Date</th><th>Time</th><th style="text-align:left;">Details</th>
+            </tr></thead>
+            <tbody id="pvNotesBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== DELAY & REMARK TAB ===== -->
+    <div id="panelNotes" style="display:none;">
+      <div class="card">
+        <h2>Add Delay / Remark</h2>
+        <form id="remarkForm">
+          <div class="form-row">
+            <div class="form-group"><label>Type</label>
+              <select id="remarkType"><option value="Remark">Remark</option><option value="Delay">Delay</option></select>
+            </div>
+            <div class="form-group"><label>Hold</label><select id="remarkHold"></select></div>
+            <div class="form-group"><label>Date</label><input type="date" id="remarkDate" required></div>
+            <div class="form-group"><label>Time From</label><input type="time" id="remarkTimeFrom"></div>
+            <div class="form-group"><label>Time To</label><input type="time" id="remarkTimeTo"></div>
+          </div>
+          <div class="form-group" style="margin-top:12px;">
+            <label>Details</label>
+            <textarea id="remarkText" rows="3" placeholder="Describe the delay or remark..."></textarea>
+          </div>
+          <button type="submit" class="btn" style="margin-top:12px;">➕ Add Entry</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Existing Entries</h2>
+        <div style="overflow-x:auto;">
+          <table style="min-width:700px;">
+            <thead><tr>
+              <th style="text-align:left;">Type</th><th>Hold</th><th>Date</th><th>Time</th><th style="text-align:left;">Details</th><th></th>
+            </tr></thead>
+            <tbody id="notesListBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="version.js"></script>
+</body>
+</html>
