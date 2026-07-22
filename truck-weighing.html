@@ -42,6 +42,7 @@ function switchTab(which) {
     tabMap[k][1].style.display = k === which ? "block" : "none";
   }
   if (which === "reverse") loadReverseList();
+  if (which === "out") loadPgiList();
 }
 
 // ================= TRUCK IN =================
@@ -212,44 +213,63 @@ document.getElementById("truckInForm").addEventListener("submit", async (e) => {
 // ================= PGI (weigh loaded truck) =================
 let pgiDocId = null, pgiEmptyWeight = 0;
 
-document.getElementById("searchOutForm").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const val = document.getElementById("searchOutInput").value.trim();
-  if (!val) return;
+// List of deliveries ready for PGI (status "Loading Complete", i.e. picked by Stevedore)
+async function loadPgiList() {
+  const body = document.getElementById("pgiListBody");
+  body.innerHTML = "<tr><td colspan='4' style='padding:10px;'>Loading...</td></tr>";
+  document.getElementById("outResultBox").style.display = "none";
+  pgiDocId = null;
+  try {
+    const q = query(collection(db, "deliveries"), orderBy("createdAt", "desc"), limit(100));
+    const snap = await getDocs(q);
+    const rows = [];
+    snap.forEach(dd => { const r = dd.data(); if (r.status === "Loading Complete") rows.push({ id: dd.id, ...r }); });
+    if (rows.length === 0) { body.innerHTML = "<tr><td colspan='4' style='padding:10px;color:#718096;'>No trucks waiting for PGI.</td></tr>"; return; }
+    body.innerHTML = "";
+    rows.forEach(r => {
+      const tr = document.createElement("tr");
+      tr.style.cursor = "pointer";
+      tr.innerHTML =
+        `<td style="padding:10px;border-bottom:1px solid #edf2f7;">${r.deliveryNo || ""}</td>` +
+        `<td style="padding:10px;border-bottom:1px solid #edf2f7;">${r.truckNumber || ""}</td>` +
+        `<td style="padding:10px;border-bottom:1px solid #edf2f7;">${r.numberOfBags || 0}</td>` +
+        `<td style="padding:10px;border-bottom:1px solid #edf2f7;color:#2c5282;font-weight:700;">Select ›</td>`;
+      tr.addEventListener("click", () => selectPgi(r, r.id));
+      body.appendChild(tr);
+    });
+  } catch (err) { console.error(err); body.innerHTML = "<tr><td colspan='4' style='padding:10px;color:#c53030;'>Could not load list.</td></tr>"; }
+}
 
-  const q = query(
-    collection(db, "deliveries"),
-    where("truckNumber", "==", val),
-    orderBy("createdAt", "desc"),
-    limit(1)
-  );
-  const snap = await getDocs(q);
-  const resultBox = document.getElementById("outResultBox");
-  resultBox.style.display = "none";
-
-  if (snap.empty) { alert("Truck not found. Please check the truck number."); return; }
-
-  const docSnap = snap.docs[0];
-  const data = docSnap.data();
-
-  if (data.status === "Truck In") {
-    alert("⚠️ This truck is still waiting to be loaded (Stevedore has not picked it yet).");
-    return;
-  }
+function selectPgi(data, docId) {
   if (data.status !== "Loading Complete") {
-    alert("⚠️ This truck cannot do PGI right now. Current status: " + data.status);
+    if (data.status === "Truck In") alert("⚠️ This truck is still waiting to be loaded (Stevedore has not picked it yet).");
+    else alert("⚠️ This truck cannot do PGI right now. Current status: " + data.status);
     return;
   }
-
-  pgiDocId = docSnap.id;
+  pgiDocId = docId;
   pgiEmptyWeight = Number(data.emptyWeight) || 0;
-
-  document.getElementById("outDeliveryNo").textContent = data.deliveryNo;
-  document.getElementById("outTruckNo").textContent = data.truckNumber;
+  document.getElementById("outDeliveryNo").textContent = data.deliveryNo || "";
+  document.getElementById("outTruckNo").textContent = data.truckNumber || "";
   document.getElementById("outBags").value = data.numberOfBags || "";
   document.getElementById("outGross").value = "";
   document.getElementById("outNetPreview").textContent = "0.00";
-  resultBox.style.display = "block";
+  const box = document.getElementById("outResultBox");
+  box.style.display = "block";
+  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+document.getElementById("pgiRefreshBtn").addEventListener("click", loadPgiList);
+
+// Manual DN search
+document.getElementById("searchOutForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  let val = document.getElementById("searchOutInput").value.trim();
+  if (!val) return;
+  val = "DN-" + val.replace(/^dn-?/i, "");
+  const q = query(collection(db, "deliveries"), where("deliveryNo", "==", val), limit(1));
+  const snap = await getDocs(q);
+  if (snap.empty) { alert("Delivery No. " + val + " not found."); return; }
+  selectPgi(snap.docs[0].data(), snap.docs[0].id);
 });
 
 document.getElementById("outGross").addEventListener("input", updatePgiNet);
@@ -261,7 +281,7 @@ function updatePgiNet() {
 }
 
 document.getElementById("confirmOutBtn").addEventListener("click", async () => {
-  if (!pgiDocId) return;
+  if (!pgiDocId) { alert("Please select a truck first."); return; }
   const gross = Number(document.getElementById("outGross").value) || 0;
   const bags = Number(document.getElementById("outBags").value) || 0;
   if (!gross) { alert("Please enter the actual (loaded) gross weight."); return; }
@@ -269,20 +289,28 @@ document.getElementById("confirmOutBtn").addEventListener("click", async () => {
   if (!confirm("Confirm PGI for this truck?")) return;
 
   const net = gross - pgiEmptyWeight;
-
-  await updateDoc(doc(db, "deliveries", pgiDocId), {
-    status: "Truck Out",
-    grossWeight: gross,
-    numberOfBags: bags,
-    netWeight: net,
-    pgiBy: sessionStorage.getItem("employeeName") || currentProfile.name || currentUser.email,
-    pgiAt: serverTimestamp()
-  });
-
-  alert("✅ PGI recorded. Truck is now on its way to the warehouse.");
-  document.getElementById("outResultBox").style.display = "none";
-  document.getElementById("searchOutForm").reset();
-  pgiDocId = null;
+  const btn = document.getElementById("confirmOutBtn");
+  btn.disabled = true; btn.textContent = "Saving...";
+  try {
+    await updateDoc(doc(db, "deliveries", pgiDocId), {
+      status: "Truck Out",
+      grossWeight: gross,
+      numberOfBags: bags,
+      netWeight: net,
+      pgiBy: sessionStorage.getItem("employeeName") || currentProfile.name || currentUser.email,
+      pgiAt: serverTimestamp()
+    });
+    alert("✅ PGI recorded. Truck is now on its way to the warehouse.");
+    document.getElementById("outResultBox").style.display = "none";
+    document.getElementById("searchOutForm").reset();
+    pgiDocId = null;
+    loadPgiList();
+  } catch (err) {
+    console.error(err);
+    alert("Error: " + err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = "✔ Confirm PGI";
+  }
 });
 
 // ================= REVERSE A DELIVERY =================
@@ -532,13 +560,28 @@ header h1{ font-size:17px; }
 
     <div id="panelOut" style="display:none;">
       <div class="card">
-        <h2>Search Truck for PGI</h2>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+          <h2 style="margin:0;">Trucks ready for PGI</h2>
+          <button id="pgiRefreshBtn" type="button" style="padding:8px 14px; background:#2c5282; color:#fff; border:none; border-radius:7px; cursor:pointer; font-weight:700; font-size:13px;">🔄 Refresh</button>
+        </div>
+        <div style="overflow-x:auto;">
+          <table style="width:100%; border-collapse:collapse; font-size:13px; min-width:420px;">
+            <thead><tr>
+              <th style="text-align:left; padding:10px; background:#f8fafc; color:#4a5568;">DN</th>
+              <th style="text-align:left; padding:10px; background:#f8fafc; color:#4a5568;">Truck</th>
+              <th style="text-align:left; padding:10px; background:#f8fafc; color:#4a5568;">Bags</th>
+              <th style="padding:10px; background:#f8fafc;"></th>
+            </tr></thead>
+            <tbody id="pgiListBody"></tbody>
+          </table>
+        </div>
+        <p style="font-size:12px; color:#718096; margin:16px 0 6px;">Or enter the Delivery No. (DN) manually:</p>
         <form id="searchOutForm" class="grid">
           <div class="form-group">
-            <label>Truck No.</label>
-            <input type="text" id="searchOutInput" required>
+            <label>Delivery No. (DN)</label>
+            <input type="text" id="searchOutInput" placeholder="e.g. DN-1001">
           </div>
-          <button type="submit" style="align-self:end; padding:10px; background:#2c5282; color:#fff; border:none; border-radius:7px; cursor:pointer; font-weight:700;">🔍 Search</button>
+          <button type="submit" style="align-self:end; padding:10px; background:#2c5282; color:#fff; border:none; border-radius:7px; cursor:pointer; font-weight:700;">🔍 Find</button>
         </form>
       </div>
 
