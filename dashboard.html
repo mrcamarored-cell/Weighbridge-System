@@ -69,6 +69,7 @@ async function loadTargets() {
     let doneWeight = 0, doneBags = 0;
     dSnap.forEach(d => {
       const r = d.data();
+      if (r.status === "Reversed") return;   // reversed deliveries return their stock to remaining
       doneWeight += Number(r.netWeight) || 0;
       doneBags += Number(r.numberOfBags) || 0;
     });

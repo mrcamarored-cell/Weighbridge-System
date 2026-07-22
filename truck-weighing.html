@@ -41,6 +41,7 @@ function switchTab(which) {
     tabMap[k][0].classList.toggle("active", k === which);
     tabMap[k][1].style.display = k === which ? "block" : "none";
   }
+  if (which === "reverse") loadReverseList();
 }
 
 // ================= TRUCK IN =================
@@ -291,8 +292,42 @@ const reverseStatusLabels = {
 };
 let reverseDocId = null, reverseStatus = null;
 
-document.getElementById("searchReverseForm").addEventListener("submit", async (e) => {
-  e.preventDefault();
+// list of active (non-completed, non-reversed) deliveries for easy DN lookup
+async function loadReverseList() {
+  const body = document.getElementById("reverseListBody");
+  body.innerHTML = "<tr><td colspan='4' style='padding:8px;'>Loading...</td></tr>";
+  try {
+    const qy = query(collection(db, "deliveries"), orderBy("createdAt", "desc"), limit(100));
+    const snap = await getDocs(qy);
+    const rows = [];
+    snap.forEach(dd => {
+      const r = dd.data();
+      if (r.status === "Completed" || r.status === "Reversed") return;
+      rows.push(r);
+    });
+    if (rows.length === 0) { body.innerHTML = "<tr><td colspan='4' style='padding:8px;color:#718096;'>No active deliveries.</td></tr>"; return; }
+    body.innerHTML = "";
+    rows.forEach(r => {
+      const tr = document.createElement("tr");
+      tr.style.cursor = "pointer";
+      tr.innerHTML =
+        `<td style="padding:8px;border-bottom:1px solid #edf2f7;">${r.deliveryNo || ""}</td>` +
+        `<td style="padding:8px;border-bottom:1px solid #edf2f7;">${r.truckNumber || ""}</td>` +
+        `<td style="padding:8px;border-bottom:1px solid #edf2f7;">${reverseStatusLabels[r.status] || r.status}</td>` +
+        `<td style="padding:8px;border-bottom:1px solid #edf2f7;color:#2c5282;font-weight:700;">Select ›</td>`;
+      tr.addEventListener("click", () => {
+        document.getElementById("reverseDn").value = r.deliveryNo || "";
+        findReverseDelivery();
+      });
+      body.appendChild(tr);
+    });
+  } catch (err) {
+    console.error(err);
+    body.innerHTML = "<tr><td colspan='4' style='padding:8px;color:#c53030;'>Could not load list.</td></tr>";
+  }
+}
+
+async function findReverseDelivery() {
   let val = document.getElementById("reverseDn").value.trim();
   if (!val) return;
   // normalise DN input: accept "1001", "dn-1001", "DN-1001" -> "DN-1001"
@@ -301,13 +336,20 @@ document.getElementById("searchReverseForm").addEventListener("submit", async (e
   const box = document.getElementById("reverseResultBox");
   box.style.display = "none";
 
-  const q = query(collection(db, "deliveries"), where("deliveryNo", "==", val), limit(1));
-  const snap = await getDocs(q);
+  const qy = query(collection(db, "deliveries"), where("deliveryNo", "==", val), limit(1));
+  const snap = await getDocs(qy);
   if (snap.empty) { alert("Delivery No. " + val + " not found."); return; }
 
   const d = snap.docs[0];
   const data = d.data();
   if (data.status === "Reversed") { alert("Delivery " + data.deliveryNo + " is already reversed."); return; }
+
+  const isAdmin = currentProfile.role === "admin";
+  // Completed deliveries can only be reversed by an admin, from an admin account
+  if (data.status === "Completed" && !isAdmin) {
+    alert("Delivery " + data.deliveryNo + " is already Completed. Only an admin can reverse it — please sign in with an admin account.");
+    return;
+  }
 
   reverseDocId = d.id;
   reverseStatus = data.status;
@@ -321,9 +363,15 @@ document.getElementById("searchReverseForm").addEventListener("submit", async (e
   document.getElementById("supUsername").value = "";
   document.getElementById("supPassword").value = "";
 
-  // supervisor approval required only if the truck has progressed beyond Truck In
-  document.getElementById("supervisorBlock").style.display = (data.status === "Truck In") ? "none" : "block";
+  // supervisor approval: needed only for a non-admin reversing a delivery beyond Truck In
+  const needSup = !isAdmin && data.status !== "Truck In";
+  document.getElementById("supervisorBlock").style.display = needSup ? "block" : "none";
   box.style.display = "block";
+}
+
+document.getElementById("searchReverseForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  findReverseDelivery();
 });
 
 document.getElementById("confirmReverseBtn").addEventListener("click", async () => {
@@ -331,8 +379,11 @@ document.getElementById("confirmReverseBtn").addEventListener("click", async () 
   const reason = document.getElementById("reverseReasonInput").value.trim();
   if (!reason) { alert("Please enter a reason for the reversal."); return; }
 
+  const isAdmin = currentProfile.role === "admin";
+  const needSup = !isAdmin && reverseStatus !== "Truck In";
+
   let approvedBy = null;
-  if (reverseStatus !== "Truck In") {
+  if (needSup) {
     const supUser = document.getElementById("supUsername").value.trim();
     const supPass = document.getElementById("supPassword").value;
     if (!supUser || !supPass) { alert("Supervisor username and password are required."); return; }
@@ -341,7 +392,10 @@ document.getElementById("confirmReverseBtn").addEventListener("click", async () 
     approvedBy = res.name;
   }
 
-  if (!confirm("Reverse this delivery? The record is kept but marked as Reversed.")) return;
+  const warnCompleted = reverseStatus === "Completed"
+    ? "This delivery is COMPLETED. Reversing it returns its stock to the remaining quantity.\n\n"
+    : "";
+  if (!confirm(warnCompleted + "Reverse this delivery? The record is kept but marked as Reversed.")) return;
 
   const btn = document.getElementById("confirmReverseBtn");
   btn.disabled = true; btn.textContent = "Reversing...";
@@ -357,6 +411,7 @@ document.getElementById("confirmReverseBtn").addEventListener("click", async () 
     document.getElementById("reverseResultBox").style.display = "none";
     document.getElementById("searchReverseForm").reset();
     reverseDocId = null; reverseStatus = null;
+    loadReverseList();
   } catch (err) {
     console.error(err);
     alert("Error: " + err.message);
@@ -519,6 +574,18 @@ header h1{ font-size:17px; }
           </div>
           <button type="submit" style="align-self:end; padding:10px; background:#2c5282; color:#fff; border:none; border-radius:7px; cursor:pointer; font-weight:700;">🔍 Find</button>
         </form>
+        <p style="font-size:12px;color:#718096;margin:16px 0 6px;">Or tap an active (not-completed) delivery below:</p>
+        <div style="overflow-x:auto;">
+          <table style="width:100%; border-collapse:collapse; font-size:13px; min-width:420px;">
+            <thead><tr>
+              <th style="text-align:left; padding:8px; background:#f8fafc; color:#4a5568;">DN</th>
+              <th style="text-align:left; padding:8px; background:#f8fafc; color:#4a5568;">Truck</th>
+              <th style="text-align:left; padding:8px; background:#f8fafc; color:#4a5568;">Status</th>
+              <th style="padding:8px; background:#f8fafc;"></th>
+            </tr></thead>
+            <tbody id="reverseListBody"></tbody>
+          </table>
+        </div>
       </div>
 
       <div class="card" id="reverseResultBox" style="display:none;">
