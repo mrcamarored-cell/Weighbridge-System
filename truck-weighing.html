@@ -28,20 +28,16 @@ document.getElementById("backBtn").addEventListener("click", () => window.locati
 // ===== Tabs =====
 const tabIn = document.getElementById("tabIn");
 const tabOut = document.getElementById("tabOut");
-const tabReverse = document.getElementById("tabReverse");
 const panelIn = document.getElementById("panelIn");
 const panelOut = document.getElementById("panelOut");
-const panelReverse = document.getElementById("panelReverse");
-const tabMap = { in:[tabIn,panelIn], out:[tabOut,panelOut], reverse:[tabReverse,panelReverse] };
+const tabMap = { in:[tabIn,panelIn], out:[tabOut,panelOut] };
 tabIn.addEventListener("click", () => switchTab("in"));
 tabOut.addEventListener("click", () => switchTab("out"));
-tabReverse.addEventListener("click", () => switchTab("reverse"));
 function switchTab(which) {
   for (const k in tabMap) {
     tabMap[k][0].classList.toggle("active", k === which);
     tabMap[k][1].style.display = k === which ? "block" : "none";
   }
-  if (which === "reverse") loadReverseList();
   if (which === "out") loadPgiList();
 }
 
@@ -211,7 +207,7 @@ document.getElementById("truckInForm").addEventListener("submit", async (e) => {
 });
 
 // ================= PGI (weigh loaded truck) =================
-let pgiDocId = null, pgiEmptyWeight = 0;
+let pgiDocId = null, pgiEmptyWeight = 0, pgiData = null;
 let pgiUnit = "KG";
 let pgiBagWeightKg = 50;
 async function loadPgiBagWeight() {
@@ -281,6 +277,7 @@ function selectPgi(data, docId) {
   }
   pgiDocId = docId;
   pgiEmptyWeight = Number(data.emptyWeight) || 0;
+  pgiData = data;
   document.getElementById("outDeliveryNo").textContent = data.deliveryNo || "";
   document.getElementById("outTruckNo").textContent = data.truckNumber || "";
   document.getElementById("outBags").value = data.numberOfBags || "";
@@ -374,92 +371,30 @@ document.getElementById("confirmOutBtn").addEventListener("click", async () => {
   }
 });
 
-// ================= REVERSE (step back one level) =================
-const reverseStatusLabels = {
-  "Truck In":"🟡 Truck In", "Loading Complete":"🔵 Loaded", "Truck Out":"🟠 PGI Done", "Completed":"🟢 Completed"
-};
-let reverseDocId = null, reverseData = null;
-
-// The weighbridge can reverse its own two stages: Truck In (delete) and Truck Out (undo PGI -> Loading Complete)
-async function loadReverseList() {
-  const body = document.getElementById("reverseListBody");
-  body.innerHTML = "<tr><td colspan='4' style='padding:8px;'>Loading...</td></tr>";
-  document.getElementById("reverseResultBox").style.display = "none";
-  reverseDocId = null; reverseData = null;
-  try {
-    const qy = query(collection(db, "deliveries"), orderBy("createdAt", "desc"), limit(150));
-    const snap = await getDocs(qy);
-    const rows = [];
-    snap.forEach(dd => { const r = dd.data(); if (r.status === "Truck In" || r.status === "Truck Out") rows.push({ id: dd.id, ...r }); });
-    if (rows.length === 0) { body.innerHTML = "<tr><td colspan='4' style='padding:8px;color:#718096;'>No reversible deliveries.</td></tr>"; return; }
-    body.innerHTML = "";
-    rows.forEach(r => {
-      const tr = document.createElement("tr");
-      tr.style.cursor = "pointer";
-      const act = r.status === "Truck In" ? "Delete" : "→ Loaded";
-      tr.innerHTML =
-        `<td style="padding:8px;border-bottom:1px solid #edf2f7;">${r.deliveryNo || ""}</td>` +
-        `<td style="padding:8px;border-bottom:1px solid #edf2f7;">${r.truckNumber || ""}</td>` +
-        `<td style="padding:8px;border-bottom:1px solid #edf2f7;">${reverseStatusLabels[r.status] || r.status}</td>` +
-        `<td style="padding:8px;border-bottom:1px solid #edf2f7;color:#c53030;font-weight:700;">${act} ›</td>`;
-      tr.addEventListener("click", () => selectReverse(r));
-      body.appendChild(tr);
-    });
-  } catch (err) { console.error(err); body.innerHTML = "<tr><td colspan='4' style='padding:8px;color:#c53030;'>Could not load list.</td></tr>"; }
-}
-
-function selectReverse(r) {
-  reverseDocId = r.id; reverseData = r;
-  document.getElementById("reverseDeliveryNo").textContent = r.deliveryNo || "";
-  document.getElementById("reverseTruckNoView").textContent = r.truckNumber || "";
-  document.getElementById("reverseStatusView").textContent = reverseStatusLabels[r.status] || r.status;
-  document.getElementById("reverseActionNote").textContent = r.status === "Truck In"
-    ? "⚠️ This will DELETE the delivery from the system (cannot be undone)."
-    : "This will step the delivery back to Loading Complete (undo PGI).";
-  document.getElementById("reverseReasonInput").value = "";
-  document.getElementById("revPassword").value = "";
-  document.getElementById("confirmReverseBtn").textContent = r.status === "Truck In" ? "🗑 Delete Delivery" : "↩ Reverse One Step";
-  const box = document.getElementById("reverseResultBox");
-  box.style.display = "block";
-  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
-}
-
-document.getElementById("searchReverseForm").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  let val = document.getElementById("reverseDn").value.trim();
-  if (!val) return;
-  val = "DN-" + val.replace(/^dn-?/i, "");
-  const snap = await getDocs(query(collection(db, "deliveries"), where("deliveryNo", "==", val), limit(1)));
-  if (snap.empty) { alert("Delivery No. " + val + " not found."); return; }
-  const r = { id: snap.docs[0].id, ...snap.docs[0].data() };
-  if (r.status !== "Truck In" && r.status !== "Truck Out") { alert("At the weighbridge you can only reverse Truck In (delete) or Truck Out (undo PGI). This delivery is: " + r.status); return; }
-  selectReverse(r);
-});
-
-document.getElementById("confirmReverseBtn").addEventListener("click", async () => {
-  if (!reverseDocId || !reverseData) return;
-  const reason = document.getElementById("reverseReasonInput").value.trim();
-  const pw = document.getElementById("revPassword").value;
-  if (!reason) { alert("Please enter a reason."); return; }
+// ===== Reverse: send this Loaded truck back to Truck In (undo Pick) =====
+document.getElementById("reverseBtn").addEventListener("click", async () => {
+  if (!pgiDocId || !pgiData) { alert("Please select a truck first."); return; }
+  const reason = document.getElementById("revReason").value.trim();
+  const pw = document.getElementById("revPass").value;
+  if (!reason) { alert("Please enter a reason for the reverse."); return; }
   if (!pw) { alert("Please enter your login password."); return; }
   const v = await verifyPassword(currentUser.email, pw);
   if (!v.ok) { alert(v.reason); return; }
-  const willDelete = reverseData.status === "Truck In";
-  if (!confirm(willDelete ? "Permanently DELETE this delivery? This cannot be undone." : "Reverse this delivery one step back?")) return;
-
-  const btn = document.getElementById("confirmReverseBtn");
-  const label = btn.textContent; btn.disabled = true; btn.textContent = "Working...";
+  if (!confirm("Reverse this truck back to Truck In (undo Pick)? It will re-appear in the Stevedore list.")) return;
+  const btn = document.getElementById("reverseBtn"); btn.disabled = true; btn.textContent = "Working...";
   try {
     const byUser = sessionStorage.getItem("employeeName") || currentProfile.name || currentUser.email;
-    const res = await reverseOneStep(reverseDocId, reverseData, reason, byUser);
-    alert(res === "deleted" ? "✅ Delivery deleted from the system." : "✅ Reversed back to: " + res);
-    document.getElementById("reverseResultBox").style.display = "none";
-    document.getElementById("searchReverseForm").reset();
-    reverseDocId = null; reverseData = null;
-    loadReverseList();
-  } catch (err) { console.error(err); alert("Error: " + err.message); }
-  finally { btn.disabled = false; btn.textContent = label; }
+    await reverseOneStep(pgiDocId, pgiData, reason, byUser);
+    alert("✅ Reversed back to Truck In.");
+    document.getElementById("outResultBox").style.display = "none";
+    document.getElementById("searchOutForm").reset();
+    document.getElementById("revReason").value = ""; document.getElementById("revPass").value = "";
+    pgiDocId = null; pgiData = null;
+    loadPgiList();
+  } catch (e) { alert("Error: " + e.message); }
+  finally { btn.disabled = false; btn.textContent = "↩ Reverse (back to Truck In)"; }
 });
+
 </script>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI',Tahoma,Arial,sans-serif; }
@@ -506,7 +441,6 @@ header h1{ font-size:17px; }
     <div class="tabs">
       <button id="tabIn" class="active">🚚 Truck In</button>
       <button id="tabOut">🏁 PGI (Loaded Weight)</button>
-      <button id="tabReverse">↩ Reverse</button>
     </div>
 
     <div id="panelIn">
@@ -635,50 +569,13 @@ header h1{ font-size:17px; }
         </div>
         <div id="outNetMsg" style="color:#c53030; font-weight:600; font-size:13px; min-height:18px; margin-top:8px;"></div>
         <button id="confirmOutBtn">✔ Confirm PGI</button>
-      </div>
-    </div>
 
-    <div id="panelReverse" style="display:none;">
-      <div class="card">
-        <h2>Reverse a Delivery</h2>
-        <form id="searchReverseForm" class="grid">
-          <div class="form-group">
-            <label>Delivery No. (DN) *</label>
-            <input type="text" id="reverseDn" required placeholder="e.g. DN-1001">
-          </div>
-          <button type="submit" style="align-self:end; padding:10px; background:#2c5282; color:#fff; border:none; border-radius:7px; cursor:pointer; font-weight:700;">🔍 Find</button>
-        </form>
-        <p style="font-size:12px;color:#718096;margin:16px 0 6px;">Or tap an active (not-completed) delivery below:</p>
-        <div style="overflow-x:auto;">
-          <table style="width:100%; border-collapse:collapse; font-size:13px; min-width:420px;">
-            <thead><tr>
-              <th style="text-align:left; padding:8px; background:#f8fafc; color:#4a5568;">DN</th>
-              <th style="text-align:left; padding:8px; background:#f8fafc; color:#4a5568;">Truck</th>
-              <th style="text-align:left; padding:8px; background:#f8fafc; color:#4a5568;">Status</th>
-              <th style="padding:8px; background:#f8fafc;"></th>
-            </tr></thead>
-            <tbody id="reverseListBody"></tbody>
-          </table>
+        <div style="border-top:1px solid #edf2f7; margin-top:18px; padding-top:14px;">
+          <p style="font-size:12px; color:#718096; margin-bottom:10px;">Wrong info? Reverse this truck back to <b>Truck In</b> (undo Pick) so the Stevedore can fix it. Requires a reason and your login password.</p>
+          <div class="form-group"><label>Reason for reverse *</label><input type="text" id="revReason"></div>
+          <div class="form-group" style="margin-top:10px;"><label>Your login password *</label><input type="password" id="revPass"></div>
+          <button id="reverseBtn" style="width:100%; padding:12px; background:#c53030; color:#fff; border:none; border-radius:8px; font-weight:700; cursor:pointer; margin-top:12px;">↩ Reverse (back to Truck In)</button>
         </div>
-      </div>
-
-      <div class="card" id="reverseResultBox" style="display:none;">
-        <h2>Reverse / Delete</h2>
-        <div class="result-row"><span>Delivery No.</span><b id="reverseDeliveryNo"></b></div>
-        <div class="result-row"><span>Truck No.</span><b id="reverseTruckNoView"></b></div>
-        <div class="result-row"><span>Current Status</span><b id="reverseStatusView"></b></div>
-        <p id="reverseActionNote" style="margin-top:12px; font-size:13px; font-weight:600; color:#c53030;"></p>
-
-        <div class="form-group" style="margin-top:12px;">
-          <label>Reason *</label>
-          <input type="text" id="reverseReasonInput" placeholder="Why are you reversing / deleting?">
-        </div>
-        <div class="form-group" style="margin-top:12px;">
-          <label>Your login password *</label>
-          <input type="password" id="revPassword" placeholder="Confirm with your own password">
-        </div>
-
-        <button id="confirmReverseBtn" style="width:100%; padding:13px; background:#c53030; color:#fff; border:none; border-radius:8px; font-size:15px; font-weight:700; cursor:pointer; margin-top:14px;">↩ Reverse One Step</button>
       </div>
     </div>
   </div>

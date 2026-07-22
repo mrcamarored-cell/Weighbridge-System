@@ -19,7 +19,6 @@ requireAuth((user, profile) => {
   document.getElementById("mainContent").style.display = "block";
   loadBagWeight().then(loadTruckInList);
   loadHoldOptions();
-  loadStevedoreReverse();
 });
 document.getElementById("logoutBtn").addEventListener("click", async () => { if(confirm("Sign out?")){ await signOut(auth); window.location.href="index.html"; }});
 document.getElementById("backBtn").addEventListener("click", () => window.location.href = "dashboard.html");
@@ -45,7 +44,7 @@ async function loadHoldOptions() {
   });
 }
 
-let selectedDocId = null;
+let selectedDocId = null, selectedData = null;
 
 // Show ONLY deliveries whose status is "Truck In"
 async function loadTruckInList() {
@@ -79,6 +78,7 @@ async function loadTruckInList() {
 
 function selectTruck(r) {
   selectedDocId = r.id;
+  selectedData = r;
   document.getElementById("resDeliveryNo").textContent = r.deliveryNo || "";
   document.getElementById("resTruckNo").textContent = r.truckNumber || "";
   document.getElementById("resEmptyWeight").textContent = (Number(r.emptyWeight)||0).toFixed(0);
@@ -115,7 +115,6 @@ document.getElementById("confirmLoadingBtn").addEventListener("click", async () 
     });
     alert("✅ Pick confirmed. Truck is ready for PGI at the weighbridge.");
     loadTruckInList();
-    loadStevedoreReverse();
   } catch (err) {
     console.error(err);
     alert("Error: " + err.message);
@@ -124,43 +123,27 @@ document.getElementById("confirmLoadingBtn").addEventListener("click", async () 
   }
 });
 
-// ===== Reverse: undo a Pick (Loading Complete -> Truck In) =====
-let revMap = {};
-async function loadStevedoreReverse() {
-  const sel = document.getElementById("revSelect");
-  const snap = await getDocs(query(collection(db, "deliveries"), orderBy("createdAt", "desc"), limit(150)));
-  sel.innerHTML = '<option value="">Select a picked delivery to undo...</option>';
-  revMap = {};
-  snap.forEach(d => {
-    const r = d.data();
-    if (r.status === "Loading Complete") {
-      revMap[d.id] = r;
-      const o = document.createElement("option");
-      o.value = d.id; o.textContent = (r.deliveryNo || "") + " — truck " + (r.truckNumber || "");
-      sel.appendChild(o);
-    }
-  });
-}
-document.getElementById("revBtn").addEventListener("click", async () => {
-  const docId = document.getElementById("revSelect").value;
-  if (!docId) { alert("Select a delivery to undo."); return; }
-  const data = revMap[docId];
+// ===== Delete: Truck In is the earliest level — it can remove the truck from the system =====
+document.getElementById("deleteBtn").addEventListener("click", async () => {
+  if (!selectedDocId || !selectedData) { alert("Please select a truck first."); return; }
   const reason = document.getElementById("revReason").value.trim();
   const pw = document.getElementById("revPass").value;
-  if (!reason) { alert("Please enter a reason."); return; }
+  if (!reason) { alert("Please enter a reason for deleting."); return; }
   if (!pw) { alert("Please enter your login password."); return; }
   const v = await verifyPassword(currentUser.email, pw);
   if (!v.ok) { alert(v.reason); return; }
-  if (!confirm("Undo this Pick and send the truck back to Truck In?")) return;
-  const btn = document.getElementById("revBtn"); btn.disabled = true; btn.textContent = "Working...";
+  if (!confirm("Permanently DELETE this truck from the system? This cannot be undone.")) return;
+  const btn = document.getElementById("deleteBtn"); btn.disabled = true; btn.textContent = "Working...";
   try {
     const byUser = sessionStorage.getItem("employeeName") || "";
-    await reverseOneStep(docId, data, reason, byUser);
-    alert("✅ Reversed back to Truck In.");
+    await reverseOneStep(selectedDocId, selectedData, reason, byUser); // Truck In -> deleted
+    alert("✅ Truck deleted from the system.");
+    document.getElementById("resultBox").style.display = "none";
     document.getElementById("revReason").value = ""; document.getElementById("revPass").value = "";
-    loadStevedoreReverse(); loadTruckInList();
+    selectedDocId = null; selectedData = null;
+    loadTruckInList();
   } catch (e) { alert("Error: " + e.message); }
-  finally { btn.disabled = false; btn.textContent = "↩ Undo Pick (back to Truck In)"; }
+  finally { btn.disabled = false; btn.textContent = "🗑 Delete Truck"; }
 });
 </script>
 <style>
@@ -227,16 +210,13 @@ header h1{ font-size:17px; }
       </div>
       <div class="result-row"><span>Estimated Weight (kg)</span><b id="estWeight">0.00</b></div>
       <button id="confirmLoadingBtn">✔ Pick</button>
-    </div>
-    <div class="card">
-      <h2>↩ Undo a Pick (Reverse)</h2>
-      <p style="font-size:12px; color:#718096; margin-bottom:10px;">Send a loaded truck back to Truck In (e.g. wrong bags/hold). Requires a reason and your login password.</p>
-      <div class="form-group"><label>Delivery</label>
-        <select id="revSelect" style="width:100%; padding:10px 12px; border:1.5px solid #e2e8f0; border-radius:7px; font-size:14px;"></select>
+
+      <div style="border-top:1px solid #edf2f7; margin-top:18px; padding-top:14px;">
+        <p style="font-size:12px; color:#718096; margin-bottom:10px;">To fix a mistake: correct the bags/hold above and press Pick. To remove the truck entirely, delete it (requires a reason and your login password).</p>
+        <div class="form-group"><label>Reason for delete *</label><input type="text" id="revReason"></div>
+        <div class="form-group" style="margin-top:10px;"><label>Your login password *</label><input type="password" id="revPass"></div>
+        <button id="deleteBtn" style="width:100%; padding:12px; background:#c53030; color:#fff; border:none; border-radius:8px; font-weight:700; cursor:pointer; margin-top:12px;">🗑 Delete Truck</button>
       </div>
-      <div class="form-group" style="margin-top:10px;"><label>Reason *</label><input type="text" id="revReason"></div>
-      <div class="form-group" style="margin-top:10px;"><label>Your login password *</label><input type="password" id="revPass"></div>
-      <button id="revBtn" style="width:100%; padding:12px; background:#c53030; color:#fff; border:none; border-radius:8px; font-weight:700; cursor:pointer; margin-top:12px;">↩ Undo Pick (back to Truck In)</button>
     </div>
   </div>
 </div>

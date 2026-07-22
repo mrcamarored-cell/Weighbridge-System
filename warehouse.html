@@ -18,13 +18,12 @@ requireAuth((user, profile) => {
   document.getElementById("loadingScreen").style.display = "none";
   document.getElementById("mainContent").style.display = "block";
   loadWarehouseList();
-  loadWarehouseReverse();
 });
 document.getElementById("logoutBtn").addEventListener("click", async () => { if(confirm("Sign out?")){ await signOut(auth); window.location.href="index.html"; }});
 document.getElementById("backBtn").addEventListener("click", () => window.location.href = "dashboard.html");
 document.getElementById("refreshBtn").addEventListener("click", loadWarehouseList);
 
-let selectedDocId = null;
+let selectedDocId = null, selectedData = null;
 
 // List of deliveries awaiting receipt (status "Truck Out", i.e. PGI done)
 async function loadWarehouseList() {
@@ -57,6 +56,7 @@ async function loadWarehouseList() {
 function selectDelivery(data, docId) {
   if (data.status !== "Truck Out") { alert("This truck cannot be received right now. Current status: " + data.status); return; }
   selectedDocId = docId;
+  selectedData = data;
   document.getElementById("resDeliveryNo").textContent = data.deliveryNo || "";
   document.getElementById("resTruckNo").textContent = data.truckNumber || "";
   document.getElementById("resGross").textContent = data.grossWeight ?? "—";
@@ -105,9 +105,8 @@ document.getElementById("confirmReceiptBtn").addEventListener("click", async () 
     alert("✅ Receipt confirmed. Delivery completed.");
     document.getElementById("resultBox").style.display = "none";
     document.getElementById("searchForm").reset();
-    selectedDocId = null;
+    selectedDocId = null; selectedData = null;
     loadWarehouseList();
-    loadWarehouseReverse();
   } catch (err) {
     console.error(err);
     alert("Error: " + err.message);
@@ -116,43 +115,28 @@ document.getElementById("confirmReceiptBtn").addEventListener("click", async () 
   }
 });
 
-// ===== Reverse: undo a receipt (Completed -> Truck Out) =====
-let revMap = {};
-async function loadWarehouseReverse() {
-  const sel = document.getElementById("revSelect");
-  const snap = await getDocs(query(collection(db, "deliveries"), orderBy("createdAt", "desc"), limit(150)));
-  sel.innerHTML = '<option value="">Select a completed delivery to undo...</option>';
-  revMap = {};
-  snap.forEach(d => {
-    const r = d.data();
-    if (r.status === "Completed") {
-      revMap[d.id] = r;
-      const o = document.createElement("option");
-      o.value = d.id; o.textContent = (r.deliveryNo || "") + " — truck " + (r.truckNumber || "");
-      sel.appendChild(o);
-    }
-  });
-}
-document.getElementById("revBtn").addEventListener("click", async () => {
-  const docId = document.getElementById("revSelect").value;
-  if (!docId) { alert("Select a delivery to undo."); return; }
-  const data = revMap[docId];
+// ===== Reverse: send this Truck Out delivery back to Loaded (undo PGI) =====
+document.getElementById("reverseBtn").addEventListener("click", async () => {
+  if (!selectedDocId || !selectedData) { alert("Please select a truck first."); return; }
   const reason = document.getElementById("revReason").value.trim();
   const pw = document.getElementById("revPass").value;
-  if (!reason) { alert("Please enter a reason."); return; }
+  if (!reason) { alert("Please enter a reason for the reverse."); return; }
   if (!pw) { alert("Please enter your login password."); return; }
   const v = await verifyPassword(currentUser.email, pw);
   if (!v.ok) { alert(v.reason); return; }
-  if (!confirm("Undo this receipt and send the truck back to Truck Out?")) return;
-  const btn = document.getElementById("revBtn"); btn.disabled = true; btn.textContent = "Working...";
+  if (!confirm("Reverse this truck back to Loaded (undo PGI)? It will re-appear in the weighbridge PGI list.")) return;
+  const btn = document.getElementById("reverseBtn"); btn.disabled = true; btn.textContent = "Working...";
   try {
     const byUser = sessionStorage.getItem("employeeName") || "";
-    await reverseOneStep(docId, data, reason, byUser);
-    alert("✅ Reversed back to Truck Out.");
+    await reverseOneStep(selectedDocId, selectedData, reason, byUser);
+    alert("✅ Reversed back to Loaded.");
+    document.getElementById("resultBox").style.display = "none";
+    document.getElementById("searchForm").reset();
     document.getElementById("revReason").value = ""; document.getElementById("revPass").value = "";
-    loadWarehouseReverse(); loadWarehouseList();
+    selectedDocId = null; selectedData = null;
+    loadWarehouseList();
   } catch (e) { alert("Error: " + e.message); }
-  finally { btn.disabled = false; btn.textContent = "↩ Undo Receipt (back to Truck Out)"; }
+  finally { btn.disabled = false; btn.textContent = "↩ Reverse (back to Loaded)"; }
 });
 </script>
 <style>
@@ -222,17 +206,14 @@ header h1{ font-size:17px; }
         <label>Confirm Number of Bags *</label>
         <input type="number" id="resBagsInput">
       </div>
-      <button id="confirmReceiptBtn">✔ Confirm Receipt</button>
-    </div>
-    <div class="card">
-      <h2>↩ Undo a Receipt (Reverse)</h2>
-      <p style="font-size:12px; color:#718096; margin-bottom:10px;">Send a completed delivery back to Truck Out. Requires a reason and your login password.</p>
-      <div class="form-group"><label>Delivery</label>
-        <select id="revSelect" style="width:100%; padding:10px 12px; border:1.5px solid #e2e8f0; border-radius:7px; font-size:14px;"></select>
+      <button id="confirmReceiptBtn">✔ Confirm Receipt (Received)</button>
+
+      <div style="border-top:1px solid #edf2f7; margin-top:18px; padding-top:14px;">
+        <p style="font-size:12px; color:#718096; margin-bottom:10px;">Bags don't match? Reverse the truck back to <b>Loaded</b> (undo PGI) so it can be re-checked. Requires a reason and your login password.</p>
+        <div class="form-group"><label>Reason for reverse *</label><input type="text" id="revReason"></div>
+        <div class="form-group" style="margin-top:10px;"><label>Your login password *</label><input type="password" id="revPass"></div>
+        <button id="reverseBtn" style="width:100%; padding:12px; background:#c53030; color:#fff; border:none; border-radius:8px; font-weight:700; cursor:pointer; margin-top:12px;">↩ Reverse (back to Loaded)</button>
       </div>
-      <div class="form-group" style="margin-top:10px;"><label>Reason *</label><input type="text" id="revReason"></div>
-      <div class="form-group" style="margin-top:10px;"><label>Your login password *</label><input type="password" id="revPass"></div>
-      <button id="revBtn" style="width:100%; padding:12px; background:#c53030; color:#fff; border:none; border-radius:8px; font-weight:700; cursor:pointer; margin-top:12px;">↩ Undo Receipt (back to Truck Out)</button>
     </div>
   </div>
 </div>
