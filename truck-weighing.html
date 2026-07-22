@@ -20,7 +20,6 @@ requireAuth((user, profile) => {
   if (empName) document.getElementById("operatorName").textContent = "Operator: " + empName;
   document.getElementById("loadingScreen").style.display = "none";
   document.getElementById("mainContent").style.display = "block";
-  loadBagWeight();
 });
 
 document.getElementById("logoutBtn").addEventListener("click", async () => { if(confirm("Sign out?")){ await signOut(auth); window.location.href="index.html"; }});
@@ -40,137 +39,168 @@ function switchTab(which) {
   panelOut.style.display = which === "out" ? "block" : "none";
 }
 
-let defaultBagWeight = 50;
-async function loadBagWeight() {
-  const snap = await getDocs(collection(db, "settings"));
-  if (!snap.empty) defaultBagWeight = Number(snap.docs[0].data().bagWeight) || 50;
-}
-
 // ================= TRUCK IN =================
 const truckInNo = document.getElementById("truckInNo");
-const deliveryNoDisplay = document.getElementById("deliveryNoDisplay");
+const truckStatusMsg = document.getElementById("truckStatusMsg");
 const emptyWeightIn = document.getElementById("emptyWeightIn");
-const emptyWeightGroup = document.getElementById("emptyWeightGroup");
+const emptyWeightUnitLabel = document.getElementById("emptyWeightUnitLabel");
+const confirmEmptyGroup = document.getElementById("confirmEmptyGroup");
+const confirmEmptyChk = document.getElementById("confirmEmptyChk");
+const correctEmptyBtn = document.getElementById("correctEmptyBtn");
 const methodSel = document.getElementById("weighingMethod");
-const grossGroup = document.getElementById("grossGroup");
-const bagsGroup = document.getElementById("bagsGroup");
-const grossWeightIn = document.getElementById("grossWeightIn");
-const bagsIn = document.getElementById("bagsIn");
-const netWeightIn = document.getElementById("netWeightIn");
-const transporterSel = document.getElementById("transporterSel");
+const dnDisplay = document.getElementById("dnDisplay");
+const transporterField = document.getElementById("transporterField");
+const vesselField = document.getElementById("vesselField");
+const unitMtBtn = document.getElementById("unitMt");
+const unitKgBtn = document.getElementById("unitKg");
+const saveInBtn = document.getElementById("saveInBtn");
 
 let truckFound = false;
+let truckDocId = null;
+let emptyKg = null;          // canonical empty weight in KG
+let emptyKgOriginal = null;  // to detect correction of an existing truck
+let unit = "MT";
+let currentTransporter = "";
+let currentVessel = "";
 
+// ---- Load current shipment (transporter + vessel) set by admin ----
+async function loadCurrentShipment() {
+  const snap = await getDocs(collection(db, "settings"));
+  if (!snap.empty) {
+    const s = snap.docs[0].data();
+    currentTransporter = s.currentTransporter || "";
+    currentVessel = s.currentVessel || "";
+  }
+  transporterField.value = currentTransporter || "(not set by admin)";
+  vesselField.value = currentVessel || "(not set by admin)";
+  if (!currentTransporter || !currentVessel) {
+    truckStatusMsg.textContent = "⚠️ Admin has not set the current Transporter/Vessel in Settings. Truck In is disabled until then.";
+    truckStatusMsg.style.color = "#c53030";
+    saveInBtn.disabled = true;
+  }
+}
+loadCurrentShipment();
+
+// ---- Unit toggle (MT default, KG option) ----
+function setUnit(u) {
+  unit = u;
+  unitMtBtn.classList.toggle("active", u === "MT");
+  unitKgBtn.classList.toggle("active", u === "KG");
+  emptyWeightUnitLabel.textContent = u;
+  renderEmptyInput();
+}
+unitMtBtn.addEventListener("click", () => setUnit("MT"));
+unitKgBtn.addEventListener("click", () => setUnit("KG"));
+
+// render the canonical KG value into the input using the selected unit
+function renderEmptyInput() {
+  if (emptyKg === null || isNaN(emptyKg)) { emptyWeightIn.value = ""; return; }
+  emptyWeightIn.value = unit === "MT" ? (emptyKg / 1000) : emptyKg;
+}
+
+// when the user types, convert the entered value (in selected unit) back to KG
+emptyWeightIn.addEventListener("input", () => {
+  const v = parseFloat(emptyWeightIn.value);
+  emptyKg = isNaN(v) ? null : (unit === "MT" ? v * 1000 : v);
+});
+
+// ---- Truck lookup: new vs existing ----
 truckInNo.addEventListener("blur", async () => {
   const val = truckInNo.value.trim();
   if (!val) return;
   const q = query(collection(db, "trucks"), where("truckNumber", "==", val));
   const snap = await getDocs(q);
+  confirmEmptyChk.checked = false;
   if (!snap.empty) {
     truckFound = true;
-    emptyWeightIn.value = snap.docs[0].data().emptyWeightKg;
-    emptyWeightGroup.style.display = "block";
+    truckDocId = snap.docs[0].id;
+    emptyKg = Number(snap.docs[0].data().emptyWeightKg) || 0;
+    emptyKgOriginal = emptyKg;
     emptyWeightIn.disabled = true;
+    correctEmptyBtn.style.display = "inline-block";
+    confirmEmptyGroup.style.display = "block";
+    truckStatusMsg.textContent = "✔ Existing truck found. Please verify the empty weight is correct.";
+    truckStatusMsg.style.color = "#2b6cb0";
   } else {
     truckFound = false;
-    emptyWeightIn.value = "";
+    truckDocId = null;
+    emptyKg = null;
+    emptyKgOriginal = null;
     emptyWeightIn.disabled = false;
-    emptyWeightGroup.style.display = "block";
-    alert("New truck. Please enter its empty weight.");
+    correctEmptyBtn.style.display = "none";
+    confirmEmptyGroup.style.display = "none";
+    truckStatusMsg.textContent = "🆕 New truck. Please enter its empty weight.";
+    truckStatusMsg.style.color = "#2f855a";
   }
-  recalcNet();
+  renderEmptyInput();
 });
 
-methodSel.addEventListener("change", () => {
-  const isActual = methodSel.value === "Actual";
-  grossGroup.style.display = isActual ? "block" : "none";
-  bagsGroup.style.display = "block";
-  recalcNet();
+// ---- Allow correcting an existing truck's empty weight ----
+correctEmptyBtn.addEventListener("click", () => {
+  emptyWeightIn.disabled = false;
+  emptyWeightIn.focus();
+  truckStatusMsg.textContent = "✏️ Correcting empty weight. This updates the truck for FUTURE records only; past records stay unchanged.";
+  truckStatusMsg.style.color = "#b7791f";
 });
-grossWeightIn.addEventListener("input", recalcNet);
-bagsIn.addEventListener("input", recalcNet);
 
-function recalcNet() {
-  const empty = Number(emptyWeightIn.value) || 0;
-  let net = 0;
-  if (methodSel.value === "Actual") {
-    const gross = Number(grossWeightIn.value) || 0;
-    net = gross - empty;
-  } else if (methodSel.value === "Theoretical") {
-    const bags = Number(bagsIn.value) || 0;
-    net = bags * defaultBagWeight;
-  }
-  netWeightIn.textContent = net > 0 ? net.toFixed(2) : "0.00";
-}
-
-async function loadTransporters() {
-  const snap = await getDocs(collection(db, "transporters"));
-  transporterSel.innerHTML = '<option value="">Select or type new...</option>';
-  snap.forEach(d => {
-    const opt = document.createElement("option");
-    opt.value = d.data().name; opt.textContent = d.data().name;
-    transporterSel.appendChild(opt);
-  });
-}
-loadTransporters();
-
+// ---- Save Truck In ----
 document.getElementById("truckInForm").addEventListener("submit", async (e) => {
   e.preventDefault();
-
   const truckNumber = truckInNo.value.trim();
-  const emptyWeight = Number(emptyWeightIn.value) || 0;
   const method = methodSel.value;
-  const gross = Number(grossWeightIn.value) || 0;
-  const bags = Number(bagsIn.value) || 0;
-  let transporter = transporterSel.value;
-  const newTransporter = document.getElementById("newTransporter").value.trim();
-  if (newTransporter) transporter = newTransporter;
 
-  if (!truckNumber || !emptyWeight || !method || !transporter) { alert("Please fill in all required fields."); return; }
-  if (method === "Actual" && !gross) { alert("Please enter Gross Weight."); return; }
-  if (!bags) { alert("Please enter Number of Bags."); return; }
+  if (!truckNumber) { alert("Please enter the truck number."); return; }
+  if (emptyKg === null || emptyKg <= 0) { alert("Please enter a valid empty weight."); return; }
+  if (!method) { alert("Please select a weighing method."); return; }
+  if (!currentTransporter || !currentVessel) { alert("Admin must set the current Transporter and Vessel in Settings first."); return; }
+  if (truckFound && !confirmEmptyChk.checked) { alert("Please confirm the empty weight is correct (or correct it) before saving."); return; }
 
-  const net = method === "Actual" ? (gross - emptyWeight) : (bags * defaultBagWeight);
-
-  const saveBtn = document.getElementById("saveInBtn");
-  saveBtn.disabled = true; saveBtn.textContent = "Saving...";
-
+  saveInBtn.disabled = true; saveInBtn.textContent = "Saving...";
   try {
-    // Save truck if new
     if (!truckFound) {
-      await addDoc(collection(db, "trucks"), { truckNumber, emptyWeightKg: emptyWeight });
-    }
-    // Save transporter if new
-    if (newTransporter) {
-      await addDoc(collection(db, "transporters"), { name: newTransporter });
+      // create the new truck master record
+      const ref = await addDoc(collection(db, "trucks"), { truckNumber, emptyWeightKg: emptyKg });
+      truckDocId = ref.id;
+    } else if (emptyKg !== emptyKgOriginal) {
+      // correction: update master for FUTURE deliveries; past deliveries keep their own snapshot
+      await updateDoc(doc(db, "trucks", truckDocId), { emptyWeightKg: emptyKg });
     }
 
     const deliveryNo = await generateDeliveryNo();
 
     await addDoc(collection(db, "deliveries"), {
-      deliveryNo, truckNumber, emptyWeight,
+      deliveryNo, truckNumber,
+      emptyWeight: emptyKg,          // snapshot in KG (canonical)
       weighingMethod: method,
-      grossWeight: method === "Actual" ? gross : null,
-      numberOfBags: bags,
-      netWeight: net,
-      transporter,
+      transporter: currentTransporter,
+      vessel: currentVessel,
+      numberOfBags: null,
+      grossWeight: null,
+      netWeight: null,
       status: "Truck In",
       truckInBy: sessionStorage.getItem("employeeName") || currentProfile.name || currentUser.email,
       truckInAt: serverTimestamp(),
       createdAt: serverTimestamp()
     });
 
+    dnDisplay.value = deliveryNo;
     alert("✅ Truck In saved. Delivery No: " + deliveryNo);
-    document.getElementById("truckInForm").reset();
-    emptyWeightGroup.style.display = "none";
-    grossGroup.style.display = "none";
-    bagsGroup.style.display = "none";
-    netWeightIn.textContent = "0.00";
+
+    // reset for the next truck (keep unit + transporter/vessel)
+    truckInNo.value = "";
+    methodSel.value = "";
+    emptyKg = null; emptyKgOriginal = null; truckFound = false; truckDocId = null;
+    emptyWeightIn.disabled = false; emptyWeightIn.value = "";
+    confirmEmptyGroup.style.display = "none";
+    confirmEmptyChk.checked = false;
+    correctEmptyBtn.style.display = "none";
+    truckStatusMsg.textContent = "";
+    setTimeout(() => { dnDisplay.value = ""; }, 4000);
   } catch (err) {
     console.error(err);
     alert("Error: " + err.message);
   } finally {
-    saveBtn.disabled = false; saveBtn.textContent = "💾 Save Truck In";
+    saveInBtn.disabled = false; saveInBtn.textContent = "💾 Save Truck In";
   }
 });
 
@@ -267,11 +297,14 @@ header h1{ font-size:17px; }
 .grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px; }
 .form-group label{ display:block; font-size:13px; font-weight:600; color:#2d3748; margin-bottom:5px; }
 .form-group input, .form-group select{ width:100%; padding:10px 12px; border:1.5px solid #e2e8f0; border-radius:7px; font-size:14px; }
+.form-group input:disabled{ background:#edf2f7; color:#4a5568; }
+.unit-btn{ padding:6px 14px; border:1.5px solid #cbd5e0; background:#fff; color:#4a5568; border-radius:6px; cursor:pointer; font-weight:700; font-size:13px; }
+.unit-btn.active{ background:#2c5282; color:#fff; border-color:#2c5282; }
 .net-box{ grid-column:1/-1; background:#c6f6d5; color:#22543d; border-radius:8px; padding:16px; text-align:center; }
 .net-box .label{ font-size:13px; }
 .net-box .value{ font-size:26px; font-weight:800; }
 #saveInBtn, #confirmOutBtn { width:100%; padding:13px; background:#2c5282; color:#fff; border:none; border-radius:8px; font-size:15px; font-weight:700; cursor:pointer; margin-top:10px; }
-#saveInBtn:disabled{ opacity:.7; }
+#saveInBtn:disabled{ opacity:.7; cursor:not-allowed; }
 .result-row{ display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #edf2f7; font-size:14px; }
 .result-row b { color:#1e3a5f; }
 </style>
@@ -298,44 +331,59 @@ header h1{ font-size:17px; }
       <form id="truckInForm">
         <div class="card">
           <h2>Truck In</h2>
+
+          <div style="display:flex; gap:8px; align-items:center; margin-bottom:14px;">
+            <span style="font-size:13px; font-weight:600; color:#2d3748;">Weight unit:</span>
+            <button type="button" id="unitMt" class="unit-btn active">MT</button>
+            <button type="button" id="unitKg" class="unit-btn">KG</button>
+          </div>
+
           <div class="grid">
             <div class="form-group">
               <label>Truck No. *</label>
               <input type="text" id="truckInNo" required placeholder="e.g. 12345">
             </div>
-            <div class="form-group" id="emptyWeightGroup" style="display:none;">
-              <label>Empty Weight (kg) *</label>
-              <input type="number" id="emptyWeightIn" required>
+
+            <div class="form-group">
+              <label>Delivery No. (auto)</label>
+              <input type="text" id="dnDisplay" disabled placeholder="Assigned automatically on save">
             </div>
+
+            <div class="form-group">
+              <label>Empty Weight (<span id="emptyWeightUnitLabel">MT</span>) *</label>
+              <input type="number" id="emptyWeightIn" step="any" required>
+              <button type="button" id="correctEmptyBtn" style="display:none; margin-top:6px; font-size:12px; background:#faf089; border:none; padding:5px 10px; border-radius:6px; cursor:pointer;">✏️ Correct empty weight</button>
+            </div>
+
             <div class="form-group">
               <label>Weighing Method *</label>
               <select id="weighingMethod" required>
                 <option value="">Select...</option>
-                <option value="Actual">Actual (weigh truck)</option>
+                <option value="Actual">Actual (weigh loaded truck at PGI)</option>
                 <option value="Theoretical">Theoretical (by bag count)</option>
               </select>
             </div>
-            <div class="form-group" id="grossGroup" style="display:none;">
-              <label>Gross Weight (kg) *</label>
-              <input type="number" id="grossWeightIn">
-            </div>
-            <div class="form-group" id="bagsGroup" style="display:none;">
-              <label>Number of Bags *</label>
-              <input type="number" id="bagsIn">
-            </div>
+
             <div class="form-group">
-              <label>Transporter *</label>
-              <select id="transporterSel"></select>
+              <label>Transporter (auto)</label>
+              <input type="text" id="transporterField" disabled>
             </div>
+
             <div class="form-group">
-              <label>Or New Transporter Name</label>
-              <input type="text" id="newTransporter" placeholder="Leave empty if selected above">
+              <label>Vessel (auto)</label>
+              <input type="text" id="vesselField" disabled>
             </div>
-            <div class="net-box">
-              <div class="label">Net Weight (kg)</div>
-              <div class="value" id="netWeightIn">0.00</div>
+
+            <div class="form-group" id="confirmEmptyGroup" style="display:none; grid-column:1/-1;">
+              <label style="display:flex; align-items:center; gap:8px; font-weight:600;">
+                <input type="checkbox" id="confirmEmptyChk" style="width:auto;">
+                I confirm the empty weight shown is correct
+              </label>
             </div>
+
+            <div id="truckStatusMsg" style="grid-column:1/-1; font-size:13px; min-height:18px;"></div>
           </div>
+
           <button type="submit" id="saveInBtn">💾 Save Truck In</button>
         </div>
       </form>

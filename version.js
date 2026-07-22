@@ -1,5 +1,5 @@
-const APP_VERSION = "v1.5.1";
-const APP_LAST_UPDATE = "2026-07-21";
+const APP_VERSION = "v1.6.0";
+const APP_LAST_UPDATE = "2026-07-22";
 
 document.addEventListener("DOMContentLoaded", () => {
   const badge = document.createElement("div");

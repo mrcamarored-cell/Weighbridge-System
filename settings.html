@@ -11,15 +11,20 @@ import {
 } from "./firebase-config.js";
 
 let settingsDocId = null;
+let currentSettings = {};
 
 requireAuth((user, profile) => {
   if (!requireRole(profile, ["admin"])) return;
   document.getElementById("loadingScreen").style.display = "none";
   document.getElementById("mainContent").style.display = "block";
-  loadSettings();
-  loadTransporters();
-  loadVessels();
+  initSettings();
 });
+
+async function initSettings() {
+  await loadSettings();
+  await loadTransporters();
+  await loadVessels();
+}
 document.getElementById("logoutBtn").addEventListener("click", async () => { if(confirm("Sign out?")){ await signOut(auth); window.location.href="index.html"; }});
 document.getElementById("backBtn").addEventListener("click", () => window.location.href = "dashboard.html");
 
@@ -29,6 +34,7 @@ async function loadSettings() {
   if (!snap.empty) {
     settingsDocId = snap.docs[0].id;
     const s = snap.docs[0].data();
+    currentSettings = s;
     document.getElementById("bagWeight").value = s.bagWeight || "";
     document.getElementById("targetWeight").value = s.targetWeight || "";
     document.getElementById("targetBags").value = s.targetBags || "";
@@ -42,22 +48,32 @@ document.getElementById("settingsForm").addEventListener("submit", async (e) => 
   const targetBags = Number(document.getElementById("targetBags").value) || 0;
 
   const id = settingsDocId || "main";
-  await setDoc(doc(db, "settings", id), { bagWeight, targetWeight, targetBags });
+  await setDoc(doc(db, "settings", id), { bagWeight, targetWeight, targetBags }, { merge: true });
   settingsDocId = id;
+  currentSettings.bagWeight = bagWeight;
+  currentSettings.targetWeight = targetWeight;
+  currentSettings.targetBags = targetBags;
   alert("✅ Settings saved.");
 });
 
 // ===== Transporters =====
 async function loadTransporters() {
   const tbody = document.getElementById("transporterTbody");
+  const sel = document.getElementById("currentTransporter");
   const snap = await getDocs(collection(db, "transporters"));
   tbody.innerHTML = "";
-  if (snap.empty) { tbody.innerHTML = "<tr><td colspan='2'>No transporters</td></tr>"; return; }
+  sel.innerHTML = '<option value="">— None —</option>';
+  if (snap.empty) { tbody.innerHTML = "<tr><td colspan='2'>No transporters</td></tr>"; }
   snap.forEach(d => {
+    const name = d.data().name;
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${d.data().name}</td><td><button class="delT" data-id="${d.id}">🗑</button></td>`;
+    tr.innerHTML = `<td>${name}</td><td><button class="delT" data-id="${d.id}">🗑</button></td>`;
     tbody.appendChild(tr);
+    const opt = document.createElement("option");
+    opt.value = name; opt.textContent = name;
+    sel.appendChild(opt);
   });
+  sel.value = currentSettings.currentTransporter || "";
   document.querySelectorAll(".delT").forEach(btn => btn.addEventListener("click", async () => {
     if (confirm("Delete this transporter?")) { await deleteDoc(doc(db, "transporters", btn.dataset.id)); loadTransporters(); }
   }));
@@ -74,14 +90,21 @@ document.getElementById("transporterForm").addEventListener("submit", async (e) 
 // ===== Vessels =====
 async function loadVessels() {
   const tbody = document.getElementById("vesselTbody");
+  const sel = document.getElementById("currentVessel");
   const snap = await getDocs(collection(db, "vessels"));
   tbody.innerHTML = "";
-  if (snap.empty) { tbody.innerHTML = "<tr><td colspan='2'>No vessels</td></tr>"; return; }
+  sel.innerHTML = '<option value="">— None —</option>';
+  if (snap.empty) { tbody.innerHTML = "<tr><td colspan='2'>No vessels</td></tr>"; }
   snap.forEach(d => {
+    const name = d.data().name;
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${d.data().name}</td><td><button class="delV" data-id="${d.id}">🗑</button></td>`;
+    tr.innerHTML = `<td>${name}</td><td><button class="delV" data-id="${d.id}">🗑</button></td>`;
     tbody.appendChild(tr);
+    const opt = document.createElement("option");
+    opt.value = name; opt.textContent = name;
+    sel.appendChild(opt);
   });
+  sel.value = currentSettings.currentVessel || "";
   document.querySelectorAll(".delV").forEach(btn => btn.addEventListener("click", async () => {
     if (confirm("Delete this vessel?")) { await deleteDoc(doc(db, "vessels", btn.dataset.id)); loadVessels(); }
   }));
@@ -93,6 +116,19 @@ document.getElementById("vesselForm").addEventListener("submit", async (e) => {
   await addDoc(collection(db, "vessels"), { name });
   document.getElementById("vesselForm").reset();
   loadVessels();
+});
+
+// ===== Current Shipment (active transporter + vessel for Truck In) =====
+document.getElementById("currentShipmentForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const currentTransporter = document.getElementById("currentTransporter").value;
+  const currentVessel = document.getElementById("currentVessel").value;
+  const id = settingsDocId || "main";
+  await setDoc(doc(db, "settings", id), { currentTransporter, currentVessel }, { merge: true });
+  settingsDocId = id;
+  currentSettings.currentTransporter = currentTransporter;
+  currentSettings.currentVessel = currentVessel;
+  alert("✅ Current shipment saved.");
 });
 
 // ===== Employees (Employee ID -> Name) =====
@@ -137,7 +173,7 @@ header h1{ font-size:17px; }
 .card h2{ font-size:16px; color:#1e3a5f; margin-bottom:14px; }
 .grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; }
 .grid label{ font-size:12px; color:#4a5568; display:block; margin-bottom:4px; }
-.grid input{ width:100%; padding:10px 12px; border:1.5px solid #e2e8f0; border-radius:7px; font-size:14px; }
+.grid input, .grid select{ width:100%; padding:10px 12px; border:1.5px solid #e2e8f0; border-radius:7px; font-size:14px; }
 .card button[type=submit]{ margin-top:14px; padding:10px 20px; background:#2c5282; color:#fff; border:none; border-radius:7px; cursor:pointer; font-weight:700; }
 .form-row{ display:flex; gap:10px; }
 .form-row input{ flex:1; padding:10px 12px; border:1.5px solid #e2e8f0; border-radius:7px; font-size:14px; }
@@ -168,6 +204,18 @@ th,td{ padding:8px; text-align:left; border-bottom:1px solid #edf2f7; }
         </div>
         <button type="submit">💾 Save Settings</button>
       </form>
+    </div>
+
+    <div class="card">
+      <h2>Current Shipment (auto-applied to new Truck In)</h2>
+      <form id="currentShipmentForm">
+        <div class="grid">
+          <div><label>Current Transporter</label><select id="currentTransporter"></select></div>
+          <div><label>Current Vessel</label><select id="currentVessel"></select></div>
+        </div>
+        <button type="submit">💾 Save Current Shipment</button>
+      </form>
+      <p style="font-size:12px;color:#718096;margin-top:8px;">Shown read-only on the Truck In screen and stored with every new delivery. Add transporters/vessels below first, then select them here.</p>
     </div>
 
     <div class="card">
