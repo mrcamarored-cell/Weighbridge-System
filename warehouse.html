@@ -14,68 +14,101 @@ requireAuth((user, profile) => {
   if (empName) document.getElementById("operatorName").textContent = "Operator: " + empName;
   document.getElementById("loadingScreen").style.display = "none";
   document.getElementById("mainContent").style.display = "block";
+  loadWarehouseList();
 });
 document.getElementById("logoutBtn").addEventListener("click", async () => { if(confirm("Sign out?")){ await signOut(auth); window.location.href="index.html"; }});
 document.getElementById("backBtn").addEventListener("click", () => window.location.href = "dashboard.html");
+document.getElementById("refreshBtn").addEventListener("click", loadWarehouseList);
 
+let selectedDocId = null;
+
+// List of deliveries awaiting receipt (status "Truck Out", i.e. PGI done)
+async function loadWarehouseList() {
+  const body = document.getElementById("listBody");
+  body.innerHTML = "<tr><td colspan='5' style='padding:10px;'>Loading...</td></tr>";
+  document.getElementById("resultBox").style.display = "none";
+  selectedDocId = null;
+  try {
+    const q = query(collection(db, "deliveries"), orderBy("createdAt", "desc"), limit(100));
+    const snap = await getDocs(q);
+    const rows = [];
+    snap.forEach(dd => { const r = dd.data(); if (r.status === "Truck Out") rows.push({ id: dd.id, ...r }); });
+    if (rows.length === 0) { body.innerHTML = "<tr><td colspan='5' style='padding:10px;color:#718096;'>No trucks awaiting receipt.</td></tr>"; return; }
+    body.innerHTML = "";
+    rows.forEach(r => {
+      const tr = document.createElement("tr");
+      tr.style.cursor = "pointer";
+      tr.innerHTML =
+        `<td style="padding:10px;border-bottom:1px solid #edf2f7;">${r.deliveryNo || ""}</td>` +
+        `<td style="padding:10px;border-bottom:1px solid #edf2f7;">${r.truckNumber || ""}</td>` +
+        `<td style="padding:10px;border-bottom:1px solid #edf2f7;">${r.numberOfBags || 0}</td>` +
+        `<td style="padding:10px;border-bottom:1px solid #edf2f7;">${(Number(r.netWeight)||0).toFixed(2)}</td>` +
+        `<td style="padding:10px;border-bottom:1px solid #edf2f7;color:#2c5282;font-weight:700;">Select ›</td>`;
+      tr.addEventListener("click", () => selectDelivery(r, r.id));
+      body.appendChild(tr);
+    });
+  } catch (err) { console.error(err); body.innerHTML = "<tr><td colspan='5' style='padding:10px;color:#c53030;'>Could not load list.</td></tr>"; }
+}
+
+function selectDelivery(data, docId) {
+  if (data.status !== "Truck Out") { alert("This truck cannot be received right now. Current status: " + data.status); return; }
+  selectedDocId = docId;
+  document.getElementById("resDeliveryNo").textContent = data.deliveryNo || "";
+  document.getElementById("resTruckNo").textContent = data.truckNumber || "";
+  document.getElementById("resGross").textContent = data.grossWeight ?? "—";
+  document.getElementById("resNet").textContent = (Number(data.netWeight)||0).toFixed(2);
+  document.getElementById("resBagsInput").value = data.numberOfBags || "";
+  const box = document.getElementById("resultBox");
+  box.style.display = "block";
+  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+// Manual entry by truck number
 document.getElementById("searchForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const truckNumber = document.getElementById("truckNo").value.trim();
   if (!truckNumber) return;
-
-  const q = query(
-    collection(db, "deliveries"),
-    where("truckNumber", "==", truckNumber),
-    orderBy("createdAt", "desc"), limit(1)
-  );
-  const snap = await getDocs(q);
-  const box = document.getElementById("resultBox");
-  box.style.display = "none";
-
-  if (snap.empty) {
-    alert("Truck not found. Please check the truck number.");
+  const snap = await getDocs(query(collection(db, "deliveries"), where("truckNumber", "==", truckNumber)));
+  if (snap.empty) { alert("Truck not found. Please check the truck number."); return; }
+  const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  const ms = x => (x.createdAt && x.createdAt.toMillis) ? x.createdAt.toMillis() : 0;
+  const truckOut = docs.filter(x => x.status === "Truck Out").sort((a, b) => ms(b) - ms(a));
+  if (truckOut.length === 0) {
+    const latest = docs.sort((a, b) => ms(b) - ms(a))[0];
+    if (latest.status === "Truck In") alert("⚠️ This truck has not been loaded yet (still at Stevedore).");
+    else if (latest.status === "Loading Complete") alert("⚠️ This truck has not completed PGI at the weighbridge yet.");
+    else alert("⚠️ This truck cannot be received right now. Current status: " + latest.status);
     return;
   }
-
-  const d = snap.docs[0];
-  const data = d.data();
-
-  if (data.status === "Truck In") {
-    alert("⚠️ This truck has not been loaded yet (still waiting at Stevedore).");
-    return;
-  }
-  if (data.status === "Loading Complete") {
-    alert("⚠️ This truck has not completed PGI at the weighbridge yet.");
-    return;
-  }
-  if (data.status !== "Truck Out") {
-    alert("⚠️ This truck cannot be received right now. Current status: " + data.status);
-    return;
-  }
-
-  document.getElementById("resDeliveryNo").textContent = data.deliveryNo;
-  document.getElementById("resTruckNo").textContent = data.truckNumber;
-  document.getElementById("resBags").textContent = data.numberOfBags;
-  document.getElementById("resGross").textContent = data.grossWeight ?? "—";
-  document.getElementById("resNet").textContent = (Number(data.netWeight)||0).toFixed(2);
-  box.style.display = "block";
-  box.dataset.docId = d.id;
+  selectDelivery(truckOut[0], truckOut[0].id);
 });
 
 document.getElementById("confirmReceiptBtn").addEventListener("click", async () => {
-  const box = document.getElementById("resultBox");
-  const docId = box.dataset.docId;
+  if (!selectedDocId) { alert("Please select a truck first."); return; }
+  const bags = Number(document.getElementById("resBagsInput").value) || 0;
+  if (!bags) { alert("Please confirm the number of bags."); return; }
   if (!confirm("Confirm receipt of this delivery?")) return;
 
-  await updateDoc(doc(db, "deliveries", docId), {
-    status: "Completed",
-    receivedBy: sessionStorage.getItem("employeeName") || "",
-    receivedAt: serverTimestamp()
-  });
-
-  alert("✅ Receipt confirmed.");
-  box.style.display = "none";
-  document.getElementById("searchForm").reset();
+  const btn = document.getElementById("confirmReceiptBtn");
+  btn.disabled = true; btn.textContent = "Saving...";
+  try {
+    await updateDoc(doc(db, "deliveries", selectedDocId), {
+      status: "Completed",
+      receivedBags: bags,
+      receivedBy: sessionStorage.getItem("employeeName") || "",
+      receivedAt: serverTimestamp()
+    });
+    alert("✅ Receipt confirmed. Delivery completed.");
+    document.getElementById("resultBox").style.display = "none";
+    document.getElementById("searchForm").reset();
+    selectedDocId = null;
+    loadWarehouseList();
+  } catch (err) {
+    console.error(err);
+    alert("Error: " + err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = "✔ Confirm Receipt";
+  }
 });
 </script>
 <style>
@@ -86,7 +119,7 @@ body { background:#f4f6f9; min-height:100vh; }
 header { background:linear-gradient(135deg,#1e3a5f,#2c5282); color:#fff; padding:14px 24px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; }
 header h1{ font-size:17px; }
 .header-actions button{ background:rgba(255,255,255,.15); color:#fff; border:1px solid rgba(255,255,255,.4); padding:7px 14px; border-radius:6px; cursor:pointer; font-size:13px; margin-left:8px; }
-.container{ max-width:700px; margin:24px auto; padding:0 16px; }
+.container{ max-width:760px; margin:24px auto; padding:0 16px; }
 .card{ background:#fff; border-radius:10px; padding:22px; box-shadow:0 2px 8px rgba(0,0,0,.06); margin-bottom:20px; }
 .card h2{ font-size:16px; color:#1e3a5f; margin-bottom:14px; }
 .form-row{ display:flex; gap:12px; align-items:end; flex-wrap:wrap; }
@@ -112,10 +145,26 @@ header h1{ font-size:17px; }
   </header>
   <div class="container">
     <div class="card">
-      <h2>Search by Truck Number</h2>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+        <h2 style="margin:0;">Trucks awaiting receipt</h2>
+        <button id="refreshBtn" type="button" style="padding:8px 14px; background:#2c5282; color:#fff; border:none; border-radius:7px; cursor:pointer; font-weight:700; font-size:13px;">🔄 Refresh</button>
+      </div>
+      <div style="overflow-x:auto;">
+        <table style="width:100%; border-collapse:collapse; font-size:13px; min-width:520px;">
+          <thead><tr>
+            <th style="text-align:left; padding:10px; background:#f8fafc; color:#4a5568;">DN</th>
+            <th style="text-align:left; padding:10px; background:#f8fafc; color:#4a5568;">Truck</th>
+            <th style="text-align:left; padding:10px; background:#f8fafc; color:#4a5568;">Bags</th>
+            <th style="text-align:left; padding:10px; background:#f8fafc; color:#4a5568;">Net (kg)</th>
+            <th style="padding:10px; background:#f8fafc;"></th>
+          </tr></thead>
+          <tbody id="listBody"></tbody>
+        </table>
+      </div>
+      <p style="font-size:12px; color:#718096; margin:16px 0 6px;">Or enter the truck number manually:</p>
       <form id="searchForm" class="form-row">
-        <div class="form-group"><label>Truck No.</label><input type="text" id="truckNo" required></div>
-        <button type="submit">🔍 Search</button>
+        <div class="form-group"><label>Truck No.</label><input type="text" id="truckNo"></div>
+        <button type="submit">🔍 Find</button>
       </form>
     </div>
 
@@ -123,9 +172,12 @@ header h1{ font-size:17px; }
       <h2>Delivery Details</h2>
       <div class="result-row"><span>Delivery No.</span><b id="resDeliveryNo"></b></div>
       <div class="result-row"><span>Truck No.</span><b id="resTruckNo"></b></div>
-      <div class="result-row"><span>Number of Bags</span><b id="resBags"></b></div>
       <div class="result-row"><span>Gross Weight</span><b id="resGross"></b></div>
       <div class="result-row"><span>Net Weight (kg)</span><b id="resNet"></b></div>
+      <div class="form-group" style="margin-top:12px;">
+        <label>Confirm Number of Bags *</label>
+        <input type="number" id="resBagsInput">
+      </div>
       <button id="confirmReceiptBtn">✔ Confirm Receipt</button>
     </div>
   </div>
