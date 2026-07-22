@@ -64,25 +64,32 @@ document.getElementById("reportFilterForm").addEventListener("submit", async (e)
   const toTs = new Date(toDate + "T" + toTime + ":59").getTime();
 
   const dSnap = await getDocs(collection(db, "deliveries"));
-  const shift = {}, cum = {};
+  // "Loaded" figures use ACTUAL PGI values (net weight + confirmed bags) of PGI-done deliveries
+  const shiftB = {}, shiftKg = {}, grandB = {}, grandKg = {};
   dSnap.forEach(dd => {
     const r = dd.data();
     if (r.status === "Reversed" || !r.hold) return;
-    if (!r.pickedAt || typeof r.pickedAt.toMillis !== "function") return;
-    const t = r.pickedAt.toMillis();
+    if (r.status !== "Truck Out" && r.status !== "Completed") return; // only PGI-done deliveries count
     const bags = Number(r.numberOfBags) || 0;
-    if (t <= toTs) cum[r.hold] = (cum[r.hold] || 0) + bags;
-    if (t >= fromTs && t <= toTs) shift[r.hold] = (shift[r.hold] || 0) + bags;
+    const kg = Number(r.netWeight) || 0;
+    // Grand total = cumulative since start of operation (all time, up to now)
+    grandB[r.hold] = (grandB[r.hold] || 0) + bags;
+    grandKg[r.hold] = (grandKg[r.hold] || 0) + kg;
+    // Loaded (this shift) = PGI recorded within the selected date/time window
+    const t = (r.pgiAt && r.pgiAt.toMillis) ? r.pgiAt.toMillis() : null;
+    if (t !== null && t >= fromTs && t <= toTs) {
+      shiftB[r.hold] = (shiftB[r.hold] || 0) + bags;
+      shiftKg[r.hold] = (shiftKg[r.hold] || 0) + kg;
+    }
   });
 
   const rows = [];
   const tot = { sb: 0, sw: 0, gb: 0, gw: 0, st: 0, bb: 0, bw: 0 };
   holdsData.forEach(h => {
-    const perBagKg = (Number(h.bags) > 0) ? (Number(h.weightKg) / Number(h.bags)) : 0;
-    const sb = shift[h.holdNo] || 0;
-    const gb = cum[h.holdNo] || 0;
-    const sw = sb * perBagKg / 1000;
-    const gw = gb * perBagKg / 1000;
+    const sb = shiftB[h.holdNo] || 0;
+    const sw = (shiftKg[h.holdNo] || 0) / 1000;
+    const gb = grandB[h.holdNo] || 0;
+    const gw = (grandKg[h.holdNo] || 0) / 1000;
     const st = Number(h.weightKg) / 1000;
     const bb = Number(h.bags) - gb;
     const bw = st - gw;
