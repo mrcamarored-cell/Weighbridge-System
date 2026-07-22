@@ -65,6 +65,57 @@ export async function verifySupervisor(username, password) {
   }
 }
 
+// ===== Verify the CURRENT user's own password (re-auth on a temporary app) =====
+export async function verifyPassword(email, password) {
+  const secondaryApp = initializeApp(firebaseConfig, "PW_" + Date.now());
+  const secondaryAuth = getAuth(secondaryApp);
+  try {
+    await signInWithEmailAndPassword(secondaryAuth, email, password);
+    await signOut(secondaryAuth);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, reason: "Incorrect password." };
+  } finally {
+    await deleteApp(secondaryApp);
+  }
+}
+
+// ===== Append an entry to the audit trail =====
+export async function logAudit(entry) {
+  try {
+    await addDoc(collection(db, "auditLog"), {
+      deliveryNo: entry.deliveryNo || "",
+      truckNumber: entry.truckNumber || "",
+      action: entry.action || "",
+      fromStatus: entry.fromStatus || "",
+      toStatus: entry.toStatus || "",
+      byUser: entry.byUser || "",
+      reason: entry.reason || "",
+      at: serverTimestamp()
+    });
+  } catch (e) { console.error("audit log failed", e); }
+}
+
+// ===== Reverse a delivery ONE step back (or delete it if it is at Truck In) =====
+export async function reverseOneStep(docId, data, reason, byUser) {
+  const prev = { "Loading Complete": "Truck In", "Truck Out": "Loading Complete", "Completed": "Truck Out" };
+  const cur = data.status;
+  if (cur === "Truck In") {
+    await deleteDoc(doc(db, "deliveries", docId));
+    await logAudit({ deliveryNo: data.deliveryNo, truckNumber: data.truckNumber, action: "Delete", fromStatus: "Truck In", toStatus: "(deleted)", byUser, reason });
+    return "deleted";
+  }
+  const to = prev[cur];
+  if (!to) throw new Error("Cannot reverse from status: " + cur);
+  const upd = { status: to, reversedIndicator: true };
+  if (cur === "Loading Complete") { upd.numberOfBags = null; upd.hold = null; upd.pickedBy = null; upd.pickedAt = null; }
+  else if (cur === "Truck Out") { upd.grossWeight = null; upd.netWeight = null; upd.pgiBy = null; upd.pgiAt = null; }
+  else if (cur === "Completed") { upd.receivedBags = null; upd.receivedBy = null; upd.receivedAt = null; }
+  await updateDoc(doc(db, "deliveries", docId), upd);
+  await logAudit({ deliveryNo: data.deliveryNo, truckNumber: data.truckNumber, action: "Reverse", fromStatus: cur, toStatus: to, byUser, reason });
+  return to;
+}
+
 // ===== Generate a safe sequential Delivery No. using a Firestore transaction =====
 export async function generateDeliveryNo() {
   const counterRef = doc(db, "counters", "deliveryNo");

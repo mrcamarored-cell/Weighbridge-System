@@ -5,16 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Warehouse Receiving</title>
 <script type="module">
-import { requireAuth, requireRole, signOut, auth, db, collection, query, where, orderBy, limit, getDocs, updateDoc, doc, serverTimestamp }
+import { requireAuth, requireRole, signOut, auth, db, collection, query, where, orderBy, limit, getDocs, updateDoc, doc, serverTimestamp, verifyPassword, reverseOneStep }
   from "./firebase-config.js";
+
+let currentUser = null;
 
 requireAuth((user, profile) => {
   if (!requireRole(profile, ["warehouse", "admin"])) return;
+  currentUser = user;
   const empName = sessionStorage.getItem("employeeName");
   if (empName) document.getElementById("operatorName").textContent = "Operator: " + empName;
   document.getElementById("loadingScreen").style.display = "none";
   document.getElementById("mainContent").style.display = "block";
   loadWarehouseList();
+  loadWarehouseReverse();
 });
 document.getElementById("logoutBtn").addEventListener("click", async () => { if(confirm("Sign out?")){ await signOut(auth); window.location.href="index.html"; }});
 document.getElementById("backBtn").addEventListener("click", () => window.location.href = "dashboard.html");
@@ -103,12 +107,52 @@ document.getElementById("confirmReceiptBtn").addEventListener("click", async () 
     document.getElementById("searchForm").reset();
     selectedDocId = null;
     loadWarehouseList();
+    loadWarehouseReverse();
   } catch (err) {
     console.error(err);
     alert("Error: " + err.message);
   } finally {
     btn.disabled = false; btn.textContent = "✔ Confirm Receipt";
   }
+});
+
+// ===== Reverse: undo a receipt (Completed -> Truck Out) =====
+let revMap = {};
+async function loadWarehouseReverse() {
+  const sel = document.getElementById("revSelect");
+  const snap = await getDocs(query(collection(db, "deliveries"), orderBy("createdAt", "desc"), limit(150)));
+  sel.innerHTML = '<option value="">Select a completed delivery to undo...</option>';
+  revMap = {};
+  snap.forEach(d => {
+    const r = d.data();
+    if (r.status === "Completed") {
+      revMap[d.id] = r;
+      const o = document.createElement("option");
+      o.value = d.id; o.textContent = (r.deliveryNo || "") + " — truck " + (r.truckNumber || "");
+      sel.appendChild(o);
+    }
+  });
+}
+document.getElementById("revBtn").addEventListener("click", async () => {
+  const docId = document.getElementById("revSelect").value;
+  if (!docId) { alert("Select a delivery to undo."); return; }
+  const data = revMap[docId];
+  const reason = document.getElementById("revReason").value.trim();
+  const pw = document.getElementById("revPass").value;
+  if (!reason) { alert("Please enter a reason."); return; }
+  if (!pw) { alert("Please enter your login password."); return; }
+  const v = await verifyPassword(currentUser.email, pw);
+  if (!v.ok) { alert(v.reason); return; }
+  if (!confirm("Undo this receipt and send the truck back to Truck Out?")) return;
+  const btn = document.getElementById("revBtn"); btn.disabled = true; btn.textContent = "Working...";
+  try {
+    const byUser = sessionStorage.getItem("employeeName") || "";
+    await reverseOneStep(docId, data, reason, byUser);
+    alert("✅ Reversed back to Truck Out.");
+    document.getElementById("revReason").value = ""; document.getElementById("revPass").value = "";
+    loadWarehouseReverse(); loadWarehouseList();
+  } catch (e) { alert("Error: " + e.message); }
+  finally { btn.disabled = false; btn.textContent = "↩ Undo Receipt (back to Truck Out)"; }
 });
 </script>
 <style>
@@ -179,6 +223,16 @@ header h1{ font-size:17px; }
         <input type="number" id="resBagsInput">
       </div>
       <button id="confirmReceiptBtn">✔ Confirm Receipt</button>
+    </div>
+    <div class="card">
+      <h2>↩ Undo a Receipt (Reverse)</h2>
+      <p style="font-size:12px; color:#718096; margin-bottom:10px;">Send a completed delivery back to Truck Out. Requires a reason and your login password.</p>
+      <div class="form-group"><label>Delivery</label>
+        <select id="revSelect" style="width:100%; padding:10px 12px; border:1.5px solid #e2e8f0; border-radius:7px; font-size:14px;"></select>
+      </div>
+      <div class="form-group" style="margin-top:10px;"><label>Reason *</label><input type="text" id="revReason"></div>
+      <div class="form-group" style="margin-top:10px;"><label>Your login password *</label><input type="password" id="revPass"></div>
+      <button id="revBtn" style="width:100%; padding:12px; background:#c53030; color:#fff; border:none; border-radius:8px; font-weight:700; cursor:pointer; margin-top:12px;">↩ Undo Receipt (back to Truck Out)</button>
     </div>
   </div>
 </div>

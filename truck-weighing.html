@@ -8,7 +8,7 @@
 import {
   requireAuth, requireRole, signOut, auth, db,
   collection, doc, getDoc, getDocs, addDoc, updateDoc, query, where, orderBy, limit,
-  serverTimestamp, generateDeliveryNo, verifySupervisor
+  serverTimestamp, generateDeliveryNo, verifySupervisor, verifyPassword, reverseOneStep
 } from "./firebase-config.js";
 
 let currentUser, currentProfile;
@@ -374,139 +374,91 @@ document.getElementById("confirmOutBtn").addEventListener("click", async () => {
   }
 });
 
-// ================= REVERSE A DELIVERY =================
+// ================= REVERSE (step back one level) =================
 const reverseStatusLabels = {
-  "Truck In":"🟡 Truck In", "Loading Complete":"🔵 Loaded", "Truck Out":"🟠 PGI Done",
-  "Completed":"🟢 Completed", "Reversed":"⚫ Reversed"
+  "Truck In":"🟡 Truck In", "Loading Complete":"🔵 Loaded", "Truck Out":"🟠 PGI Done", "Completed":"🟢 Completed"
 };
-let reverseDocId = null, reverseStatus = null;
+let reverseDocId = null, reverseData = null;
 
-// list of active (non-completed, non-reversed) deliveries for easy DN lookup
+// The weighbridge can reverse its own two stages: Truck In (delete) and Truck Out (undo PGI -> Loading Complete)
 async function loadReverseList() {
   const body = document.getElementById("reverseListBody");
   body.innerHTML = "<tr><td colspan='4' style='padding:8px;'>Loading...</td></tr>";
+  document.getElementById("reverseResultBox").style.display = "none";
+  reverseDocId = null; reverseData = null;
   try {
-    const qy = query(collection(db, "deliveries"), orderBy("createdAt", "desc"), limit(100));
+    const qy = query(collection(db, "deliveries"), orderBy("createdAt", "desc"), limit(150));
     const snap = await getDocs(qy);
     const rows = [];
-    snap.forEach(dd => {
-      const r = dd.data();
-      if (r.status === "Completed" || r.status === "Reversed") return;
-      rows.push(r);
-    });
-    if (rows.length === 0) { body.innerHTML = "<tr><td colspan='4' style='padding:8px;color:#718096;'>No active deliveries.</td></tr>"; return; }
+    snap.forEach(dd => { const r = dd.data(); if (r.status === "Truck In" || r.status === "Truck Out") rows.push({ id: dd.id, ...r }); });
+    if (rows.length === 0) { body.innerHTML = "<tr><td colspan='4' style='padding:8px;color:#718096;'>No reversible deliveries.</td></tr>"; return; }
     body.innerHTML = "";
     rows.forEach(r => {
       const tr = document.createElement("tr");
       tr.style.cursor = "pointer";
+      const act = r.status === "Truck In" ? "Delete" : "→ Loaded";
       tr.innerHTML =
         `<td style="padding:8px;border-bottom:1px solid #edf2f7;">${r.deliveryNo || ""}</td>` +
         `<td style="padding:8px;border-bottom:1px solid #edf2f7;">${r.truckNumber || ""}</td>` +
         `<td style="padding:8px;border-bottom:1px solid #edf2f7;">${reverseStatusLabels[r.status] || r.status}</td>` +
-        `<td style="padding:8px;border-bottom:1px solid #edf2f7;color:#2c5282;font-weight:700;">Select ›</td>`;
-      tr.addEventListener("click", () => {
-        document.getElementById("reverseDn").value = r.deliveryNo || "";
-        findReverseDelivery();
-      });
+        `<td style="padding:8px;border-bottom:1px solid #edf2f7;color:#c53030;font-weight:700;">${act} ›</td>`;
+      tr.addEventListener("click", () => selectReverse(r));
       body.appendChild(tr);
     });
-  } catch (err) {
-    console.error(err);
-    body.innerHTML = "<tr><td colspan='4' style='padding:8px;color:#c53030;'>Could not load list.</td></tr>";
-  }
+  } catch (err) { console.error(err); body.innerHTML = "<tr><td colspan='4' style='padding:8px;color:#c53030;'>Could not load list.</td></tr>"; }
 }
 
-async function findReverseDelivery() {
+function selectReverse(r) {
+  reverseDocId = r.id; reverseData = r;
+  document.getElementById("reverseDeliveryNo").textContent = r.deliveryNo || "";
+  document.getElementById("reverseTruckNoView").textContent = r.truckNumber || "";
+  document.getElementById("reverseStatusView").textContent = reverseStatusLabels[r.status] || r.status;
+  document.getElementById("reverseActionNote").textContent = r.status === "Truck In"
+    ? "⚠️ This will DELETE the delivery from the system (cannot be undone)."
+    : "This will step the delivery back to Loading Complete (undo PGI).";
+  document.getElementById("reverseReasonInput").value = "";
+  document.getElementById("revPassword").value = "";
+  document.getElementById("confirmReverseBtn").textContent = r.status === "Truck In" ? "🗑 Delete Delivery" : "↩ Reverse One Step";
+  const box = document.getElementById("reverseResultBox");
+  box.style.display = "block";
+  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+document.getElementById("searchReverseForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
   let val = document.getElementById("reverseDn").value.trim();
   if (!val) return;
-  // normalise DN input: accept "1001", "dn-1001", "DN-1001" -> "DN-1001"
   val = "DN-" + val.replace(/^dn-?/i, "");
-
-  const box = document.getElementById("reverseResultBox");
-  box.style.display = "none";
-
-  const qy = query(collection(db, "deliveries"), where("deliveryNo", "==", val), limit(1));
-  const snap = await getDocs(qy);
+  const snap = await getDocs(query(collection(db, "deliveries"), where("deliveryNo", "==", val), limit(1)));
   if (snap.empty) { alert("Delivery No. " + val + " not found."); return; }
-
-  const d = snap.docs[0];
-  const data = d.data();
-  if (data.status === "Reversed") { alert("Delivery " + data.deliveryNo + " is already reversed."); return; }
-
-  const isAdmin = currentProfile.role === "admin";
-  // Completed deliveries can only be reversed by an admin, from an admin account
-  if (data.status === "Completed" && !isAdmin) {
-    alert("Delivery " + data.deliveryNo + " is already Completed. Only an admin can reverse it — please sign in with an admin account.");
-    return;
-  }
-
-  reverseDocId = d.id;
-  reverseStatus = data.status;
-
-  document.getElementById("reverseDeliveryNo").textContent = data.deliveryNo || "";
-  document.getElementById("reverseTruckNoView").textContent = data.truckNumber || "";
-  document.getElementById("reverseStatusView").textContent = reverseStatusLabels[data.status] || data.status;
-  document.getElementById("reverseTransporterView").textContent = data.transporter || "—";
-  document.getElementById("reverseVesselView").textContent = data.vessel || "—";
-  document.getElementById("reverseReasonInput").value = "";
-  document.getElementById("supUsername").value = "";
-  document.getElementById("supPassword").value = "";
-
-  // supervisor approval: needed only for a non-admin reversing a delivery beyond Truck In
-  const needSup = !isAdmin && data.status !== "Truck In";
-  document.getElementById("supervisorBlock").style.display = needSup ? "block" : "none";
-  box.style.display = "block";
-}
-
-document.getElementById("searchReverseForm").addEventListener("submit", (e) => {
-  e.preventDefault();
-  findReverseDelivery();
+  const r = { id: snap.docs[0].id, ...snap.docs[0].data() };
+  if (r.status !== "Truck In" && r.status !== "Truck Out") { alert("At the weighbridge you can only reverse Truck In (delete) or Truck Out (undo PGI). This delivery is: " + r.status); return; }
+  selectReverse(r);
 });
 
 document.getElementById("confirmReverseBtn").addEventListener("click", async () => {
-  if (!reverseDocId) return;
+  if (!reverseDocId || !reverseData) return;
   const reason = document.getElementById("reverseReasonInput").value.trim();
-  if (!reason) { alert("Please enter a reason for the reversal."); return; }
-
-  const isAdmin = currentProfile.role === "admin";
-  const needSup = !isAdmin && reverseStatus !== "Truck In";
-
-  let approvedBy = null;
-  if (needSup) {
-    const supUser = document.getElementById("supUsername").value.trim();
-    const supPass = document.getElementById("supPassword").value;
-    if (!supUser || !supPass) { alert("Supervisor username and password are required."); return; }
-    const res = await verifySupervisor(supUser, supPass);
-    if (!res.ok) { alert(res.reason); return; }
-    approvedBy = res.name;
-  }
-
-  const warnCompleted = reverseStatus === "Completed"
-    ? "This delivery is COMPLETED. Reversing it returns its stock to the remaining quantity.\n\n"
-    : "";
-  if (!confirm(warnCompleted + "Reverse this delivery? The record is kept but marked as Reversed.")) return;
+  const pw = document.getElementById("revPassword").value;
+  if (!reason) { alert("Please enter a reason."); return; }
+  if (!pw) { alert("Please enter your login password."); return; }
+  const v = await verifyPassword(currentUser.email, pw);
+  if (!v.ok) { alert(v.reason); return; }
+  const willDelete = reverseData.status === "Truck In";
+  if (!confirm(willDelete ? "Permanently DELETE this delivery? This cannot be undone." : "Reverse this delivery one step back?")) return;
 
   const btn = document.getElementById("confirmReverseBtn");
-  btn.disabled = true; btn.textContent = "Reversing...";
+  const label = btn.textContent; btn.disabled = true; btn.textContent = "Working...";
   try {
-    await updateDoc(doc(db, "deliveries", reverseDocId), {
-      status: "Reversed",
-      reverseReason: reason,
-      reversedBy: sessionStorage.getItem("employeeName") || currentProfile.name || currentUser.email,
-      reversedAt: serverTimestamp(),
-      reverseApprovedBy: approvedBy
-    });
-    alert("✅ Delivery reversed and recorded.");
+    const byUser = sessionStorage.getItem("employeeName") || currentProfile.name || currentUser.email;
+    const res = await reverseOneStep(reverseDocId, reverseData, reason, byUser);
+    alert(res === "deleted" ? "✅ Delivery deleted from the system." : "✅ Reversed back to: " + res);
     document.getElementById("reverseResultBox").style.display = "none";
     document.getElementById("searchReverseForm").reset();
-    reverseDocId = null; reverseStatus = null;
+    reverseDocId = null; reverseData = null;
     loadReverseList();
-  } catch (err) {
-    console.error(err);
-    alert("Error: " + err.message);
-  } finally {
-    btn.disabled = false; btn.textContent = "↩ Reverse This Delivery";
-  }
+  } catch (err) { console.error(err); alert("Error: " + err.message); }
+  finally { btn.disabled = false; btn.textContent = label; }
 });
 </script>
 <style>
@@ -711,27 +663,22 @@ header h1{ font-size:17px; }
       </div>
 
       <div class="card" id="reverseResultBox" style="display:none;">
-        <h2>Delivery to Reverse</h2>
+        <h2>Reverse / Delete</h2>
         <div class="result-row"><span>Delivery No.</span><b id="reverseDeliveryNo"></b></div>
         <div class="result-row"><span>Truck No.</span><b id="reverseTruckNoView"></b></div>
         <div class="result-row"><span>Current Status</span><b id="reverseStatusView"></b></div>
-        <div class="result-row"><span>Transporter</span><b id="reverseTransporterView"></b></div>
-        <div class="result-row"><span>Vessel</span><b id="reverseVesselView"></b></div>
+        <p id="reverseActionNote" style="margin-top:12px; font-size:13px; font-weight:600; color:#c53030;"></p>
 
-        <div class="form-group" style="margin-top:14px;">
-          <label>Reason for reversal *</label>
-          <input type="text" id="reverseReasonInput" placeholder="e.g. wrong truck number entered">
+        <div class="form-group" style="margin-top:12px;">
+          <label>Reason *</label>
+          <input type="text" id="reverseReasonInput" placeholder="Why are you reversing / deleting?">
+        </div>
+        <div class="form-group" style="margin-top:12px;">
+          <label>Your login password *</label>
+          <input type="password" id="revPassword" placeholder="Confirm with your own password">
         </div>
 
-        <div id="supervisorBlock" style="display:none; margin-top:12px; padding:14px; background:#fff5f5; border:1px solid #fed7d7; border-radius:8px;">
-          <p style="font-size:13px; color:#c53030; font-weight:600; margin-bottom:10px;">⚠️ This truck has progressed beyond Truck In. Supervisor approval is required.</p>
-          <div class="grid">
-            <div class="form-group"><label>Supervisor Username</label><input type="text" id="supUsername"></div>
-            <div class="form-group"><label>Supervisor Password</label><input type="password" id="supPassword"></div>
-          </div>
-        </div>
-
-        <button id="confirmReverseBtn" style="width:100%; padding:13px; background:#c53030; color:#fff; border:none; border-radius:8px; font-size:15px; font-weight:700; cursor:pointer; margin-top:14px;">↩ Reverse This Delivery</button>
+        <button id="confirmReverseBtn" style="width:100%; padding:13px; background:#c53030; color:#fff; border:none; border-radius:8px; font-size:15px; font-weight:700; cursor:pointer; margin-top:14px;">↩ Reverse One Step</button>
       </div>
     </div>
   </div>
