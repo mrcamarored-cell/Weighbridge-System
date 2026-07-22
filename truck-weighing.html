@@ -212,6 +212,39 @@ document.getElementById("truckInForm").addEventListener("submit", async (e) => {
 
 // ================= PGI (weigh loaded truck) =================
 let pgiDocId = null, pgiEmptyWeight = 0;
+let pgiUnit = "KG";
+let pgiBagWeightKg = 50;
+async function loadPgiBagWeight() {
+  const snap = await getDocs(collection(db, "settings"));
+  if (!snap.empty) pgiBagWeightKg = Number(snap.docs[0].data().bagWeight) || 50;
+}
+loadPgiBagWeight();
+
+function pgiGrossKg() {
+  const v = Number(document.getElementById("outGross").value) || 0;
+  return pgiUnit === "MT" ? v * 1000 : v;
+}
+function setPgiNetBox(ok, msg) {
+  const box = document.getElementById("outNetBox");
+  box.style.background = ok ? "#c6f6d5" : "#fc8181";
+  box.style.color = ok ? "#22543d" : "#742a2a";
+  document.getElementById("outNetMsg").textContent = msg;
+}
+function setPgiUnit(u) {
+  pgiUnit = u;
+  document.getElementById("pgiUnitKg").classList.toggle("active", u === "KG");
+  document.getElementById("pgiUnitMt").classList.toggle("active", u === "MT");
+  document.getElementById("pgiUnitLabel").textContent = u;
+  updatePgiNet();
+}
+function applyPgiMethod() {
+  const m = document.getElementById("pgiMethod").value;
+  document.getElementById("grossRow").style.display = (m === "Theoretical") ? "none" : "block";
+  updatePgiNet();
+}
+document.getElementById("pgiUnitKg").addEventListener("click", () => setPgiUnit("KG"));
+document.getElementById("pgiUnitMt").addEventListener("click", () => setPgiUnit("MT"));
+document.getElementById("pgiMethod").addEventListener("change", applyPgiMethod);
 
 // List of deliveries ready for PGI (status "Loading Complete", i.e. picked by Stevedore)
 async function loadPgiList() {
@@ -253,6 +286,11 @@ function selectPgi(data, docId) {
   document.getElementById("outBags").value = data.numberOfBags || "";
   document.getElementById("outGross").value = "";
   document.getElementById("outNetPreview").textContent = "0.00";
+  document.getElementById("pgiMethod").value = data.weighingMethod || "Actual";
+  setPgiUnit("KG");
+  applyPgiMethod();
+  const nb = document.getElementById("outNetBox"); if (nb) { nb.style.background = "#c6f6d5"; nb.style.color = "#22543d"; }
+  const nm = document.getElementById("outNetMsg"); if (nm) nm.textContent = "";
   const box = document.getElementById("outResultBox");
   box.style.display = "block";
   box.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -275,20 +313,42 @@ document.getElementById("searchOutForm").addEventListener("submit", async (e) =>
 document.getElementById("outGross").addEventListener("input", updatePgiNet);
 document.getElementById("outBags").addEventListener("input", updatePgiNet);
 function updatePgiNet() {
-  const gross = Number(document.getElementById("outGross").value) || 0;
-  const net = gross - pgiEmptyWeight;
-  document.getElementById("outNetPreview").textContent = net > 0 ? net.toFixed(2) : "0.00";
+  const method = document.getElementById("pgiMethod").value;
+  const bags = Number(document.getElementById("outBags").value) || 0;
+  let net;
+  if (method === "Theoretical") {
+    net = bags * pgiBagWeightKg;
+  } else {
+    const gross = pgiGrossKg();
+    if (!gross) { document.getElementById("outNetPreview").textContent = "0.00"; setPgiNetBox(true, ""); return; }
+    net = gross - pgiEmptyWeight;
+  }
+  document.getElementById("outNetPreview").textContent = net.toFixed(2);
+  if (net <= 0) setPgiNetBox(false, "⚠️ Net weight is zero or negative — check inputs. Cannot save.");
+  else if (net > 35000) setPgiNetBox(false, "⚠️ Net weight exceeds 35 t — check inputs. Cannot save.");
+  else setPgiNetBox(true, "");
 }
 
 document.getElementById("confirmOutBtn").addEventListener("click", async () => {
   if (!pgiDocId) { alert("Please select a truck first."); return; }
-  const gross = Number(document.getElementById("outGross").value) || 0;
+  const method = document.getElementById("pgiMethod").value;
   const bags = Number(document.getElementById("outBags").value) || 0;
-  if (!gross) { alert("Please enter the actual (loaded) gross weight."); return; }
   if (!bags) { alert("Please confirm number of bags."); return; }
+
+  let gross, net;
+  if (method === "Theoretical") {
+    net = bags * pgiBagWeightKg;
+    gross = net + pgiEmptyWeight;   // derived (not weighed)
+  } else {
+    gross = pgiGrossKg();
+    if (!gross) { alert("Please enter the actual (loaded) gross weight."); return; }
+    net = gross - pgiEmptyWeight;
+  }
+  if (net <= 0) { alert("Net weight is zero or negative. The system cannot accept this. Please re-check the inputs."); return; }
+  if (net > 35000) { alert("Net weight exceeds 35 tonnes. The system cannot accept this. Please re-check the inputs."); return; }
+
   if (!confirm("Confirm PGI for this truck?")) return;
 
-  const net = gross - pgiEmptyWeight;
   const btn = document.getElementById("confirmOutBtn");
   btn.disabled = true; btn.textContent = "Saving...";
   try {
@@ -297,6 +357,7 @@ document.getElementById("confirmOutBtn").addEventListener("click", async () => {
       grossWeight: gross,
       numberOfBags: bags,
       netWeight: net,
+      weighingMethod: method,
       pgiBy: sessionStorage.getItem("employeeName") || currentProfile.name || currentUser.email,
       pgiAt: serverTimestamp()
     });
@@ -589,20 +650,38 @@ header h1{ font-size:17px; }
         <h2>Delivery Details</h2>
         <div class="result-row"><span>Delivery No.</span><b id="outDeliveryNo"></b></div>
         <div class="result-row"><span>Truck No.</span><b id="outTruckNo"></b></div>
+
         <div class="grid" style="margin-top:12px;">
           <div class="form-group">
-            <label>Actual Gross Weight (kg) *</label>
-            <input type="number" id="outGross" required placeholder="Read from scale">
+            <label>Weighing Method *</label>
+            <select id="pgiMethod">
+              <option value="Actual">Actual (weigh loaded truck)</option>
+              <option value="Theoretical">Theoretical (by bag count)</option>
+            </select>
           </div>
           <div class="form-group">
             <label>Confirm Number of Bags *</label>
             <input type="number" id="outBags" required>
           </div>
-          <div class="net-box">
-            <div class="label">Net Weight (kg)</div>
-            <div class="value" id="outNetPreview">0.00</div>
+        </div>
+
+        <div id="grossRow" style="margin-top:12px;">
+          <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+            <span style="font-size:13px; font-weight:600; color:#2d3748;">Weight unit:</span>
+            <button type="button" id="pgiUnitKg" class="unit-btn active">KG</button>
+            <button type="button" id="pgiUnitMt" class="unit-btn">MT</button>
+          </div>
+          <div class="form-group">
+            <label>Actual Gross Weight (<span id="pgiUnitLabel">KG</span>) *</label>
+            <input type="number" id="outGross" step="any" placeholder="Read from scale">
           </div>
         </div>
+
+        <div class="net-box" id="outNetBox" style="margin-top:12px;">
+          <div class="label">Net Weight (kg)</div>
+          <div class="value" id="outNetPreview">0.00</div>
+        </div>
+        <div id="outNetMsg" style="color:#c53030; font-weight:600; font-size:13px; min-height:18px; margin-top:8px;"></div>
         <button id="confirmOutBtn">✔ Confirm PGI</button>
       </div>
     </div>
