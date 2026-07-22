@@ -17,10 +17,10 @@ document.getElementById("logoutBtn").addEventListener("click", async () => { if(
 document.getElementById("backBtn").addEventListener("click", () => window.location.href = "dashboard.html");
 
 const statusColors = {
-  "Truck In": "#fefcbf", "Loading Complete": "#bee3f8", "Truck Out": "#feebc8", "Completed": "#c6f6d5"
+  "Truck In": "#fefcbf", "Loading Complete": "#bee3f8", "Truck Out": "#feebc8", "Completed": "#c6f6d5", "Reversed": "#e2e8f0"
 };
 const statusText = {
-  "Truck In": "🟡 Truck In", "Loading Complete": "🔵 Loaded", "Truck Out": "🟠 PGI Done", "Completed": "🟢 Completed"
+  "Truck In": "🟡 Truck In", "Loading Complete": "🔵 Loaded", "Truck Out": "🟠 PGI Done", "Completed": "🟢 Completed", "Reversed": "⚫ Reversed"
 };
 
 function startListening() {
@@ -34,9 +34,11 @@ function startListening() {
 
     snap.forEach(d => {
       const r = d.data();
-      count++;
-      totalWeight += Number(r.netWeight) || 0;
-      totalBags += Number(r.numberOfBags) || 0;
+      if (r.status !== "Reversed") {
+        count++;
+        totalWeight += Number(r.netWeight) || 0;
+        totalBags += Number(r.numberOfBags) || 0;
+      }
 
       const date = r.createdAt ? r.createdAt.toDate().toLocaleString("en-US") : "—";
       const tr = document.createElement("tr");

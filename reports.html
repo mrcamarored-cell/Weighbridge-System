@@ -71,10 +71,15 @@ document.getElementById("truckForm").addEventListener("submit", async (e) => {
 
 function renderResults(records) {
   document.getElementById("resultsSection").style.display = "block";
-  let totalWeight = 0, totalBags = 0;
-  records.forEach(r => { totalWeight += Number(r.netWeight)||0; totalBags += Number(r.numberOfBags)||0; });
+  let totalWeight = 0, totalBags = 0, activeCount = 0;
+  records.forEach(r => {
+    if (r.status === "Reversed") return;
+    activeCount++;
+    totalWeight += Number(r.netWeight)||0;
+    totalBags += Number(r.numberOfBags)||0;
+  });
 
-  document.getElementById("sumCount").textContent = records.length;
+  document.getElementById("sumCount").textContent = activeCount;
   document.getElementById("sumWeight").textContent = (totalWeight/1000).toFixed(2);
   document.getElementById("sumBags").textContent = totalBags;
 
@@ -85,6 +90,7 @@ function renderResults(records) {
   records.forEach(r => {
     const date = r.createdAt ? r.createdAt.toDate().toLocaleString("en-US") : "—";
     const tr = document.createElement("tr");
+    if (r.status === "Reversed") { tr.style.opacity = "0.55"; tr.style.textDecoration = "line-through"; }
     tr.innerHTML = `
       <td>${r.deliveryNo||""}</td><td>${r.truckNumber||""}</td><td>${r.status||""}</td>
       <td>${r.weighingMethod||""}</td><td>${r.numberOfBags||0}</td>
@@ -111,7 +117,7 @@ document.getElementById("exportBtn").addEventListener("click", () => {
   }));
 
   let totalWeight = 0, totalBags = 0;
-  currentRecords.forEach(r => { totalWeight += Number(r.netWeight)||0; totalBags += Number(r.numberOfBags)||0; });
+  currentRecords.forEach(r => { if (r.status === "Reversed") return; totalWeight += Number(r.netWeight)||0; totalBags += Number(r.numberOfBags)||0; });
   rows.push({});
   rows.push({ "Delivery No.": "TOTAL", "Net Weight (kg)": totalWeight, "Bags": totalBags });
 
