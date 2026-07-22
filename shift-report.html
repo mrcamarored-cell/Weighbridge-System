@@ -10,10 +10,11 @@
 import { requireAuth, requireRole, signOut, auth, db, collection, query, orderBy, getDocs, addDoc, deleteDoc, doc, serverTimestamp, Timestamp }
   from "./firebase-config.js";
 
+let operatorName = "";
 requireAuth((user, profile) => {
   if (!requireRole(profile, ["loading", "admin"])) return;
-  const empName = sessionStorage.getItem("employeeName");
-  if (empName) document.getElementById("operatorName").textContent = "Operator: " + empName;
+  operatorName = sessionStorage.getItem("employeeName") || (profile && profile.name) || (user && user.email) || "";
+  if (operatorName) document.getElementById("operatorName").textContent = "Operator: " + operatorName;
   document.getElementById("loadingScreen").style.display = "none";
   document.getElementById("mainContent").style.display = "block";
   loadMeta();
@@ -109,7 +110,7 @@ document.getElementById("reportFilterForm").addEventListener("submit", async (e)
   });
   notes.sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
 
-  lastReport = { vessel: currentVessel, dateRange: fromDate + " → " + toDate, timeRange: fromTime + " → " + toTime, rows, totalsRow, notes };
+  lastReport = { vessel: currentVessel, preparedBy: operatorName, dateRange: fromDate + " to " + toDate, timeRange: fromTime + " to " + toTime, rows, totalsRow, notes };
   renderPreview(lastReport);
   document.getElementById("downloadBtn").disabled = false;
 });
@@ -118,6 +119,7 @@ function renderPreview(rep) {
   document.getElementById("pvVessel").textContent = rep.vessel || "—";
   document.getElementById("pvDate").textContent = rep.dateRange;
   document.getElementById("pvTime").textContent = rep.timeRange;
+  document.getElementById("pvBy").textContent = rep.preparedBy || "—";
   const c = "padding:9px;border-bottom:1px solid #edf2f7;text-align:center;";
   const body = document.getElementById("reportBody");
   body.innerHTML = "";
@@ -151,9 +153,10 @@ document.getElementById("downloadBtn").addEventListener("click", () => {
   docp.text("Vessel: " + (lastReport.vessel || "—"), 14, 24);
   docp.text("Date: " + lastReport.dateRange, 14, 30);
   docp.text("Time: " + lastReport.timeRange, 14, 36);
+  docp.text("Prepared by: " + (lastReport.preparedBy || "—"), 14, 42);
 
   docp.autoTable({
-    startY: 42,
+    startY: 48,
     head: [["Hold No.", "Loaded Bags", "Load Qty (MT)", "Grand Total Bags", "Grand Total (MT)", "Stowage (MT)", "Balance Bags", "Balance (MT)"]],
     body: lastReport.rows,
     foot: [lastReport.totalsRow],
@@ -282,6 +285,7 @@ th{ background:#f8fafc; color:#4a5568; padding:9px; text-align:center; }
           <div>Vessel: <b id="pvVessel">—</b></div>
           <div>Date: <b id="pvDate">—</b></div>
           <div>Time: <b id="pvTime">—</b></div>
+          <div>Prepared by: <b id="pvBy">—</b></div>
         </div>
         <div style="overflow-x:auto;">
           <table style="min-width:820px;">
