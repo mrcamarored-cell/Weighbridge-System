@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Stevedore</title>
 <script type="module">
-import { requireAuth, requireRole, signOut, auth, db, collection, query, where, orderBy, limit, getDocs, updateDoc, doc, serverTimestamp }
+import { requireAuth, requireRole, signOut, auth, db, collection, query, orderBy, limit, getDocs, updateDoc, doc, serverTimestamp }
   from "./firebase-config.js";
 
 requireAuth((user, profile) => {
@@ -14,10 +14,12 @@ requireAuth((user, profile) => {
   if (empName) document.getElementById("operatorName").textContent = "Operator: " + empName;
   document.getElementById("loadingScreen").style.display = "none";
   document.getElementById("mainContent").style.display = "block";
-  loadBagWeight();
+  loadBagWeight().then(loadTruckInList);
+  loadHoldOptions();
 });
 document.getElementById("logoutBtn").addEventListener("click", async () => { if(confirm("Sign out?")){ await signOut(auth); window.location.href="index.html"; }});
 document.getElementById("backBtn").addEventListener("click", () => window.location.href = "dashboard.html");
+document.getElementById("refreshBtn").addEventListener("click", loadTruckInList);
 
 let defaultBagWeight = 50;
 async function loadBagWeight() {
@@ -25,41 +27,64 @@ async function loadBagWeight() {
   if (!snap.empty) defaultBagWeight = Number(snap.docs[0].data().bagWeight) || 50;
 }
 
-document.getElementById("searchForm").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const truckNumber = document.getElementById("truckNo").value.trim();
-  if (!truckNumber) return;
+async function loadHoldOptions() {
+  const sel = document.getElementById("holdSelect");
+  const snap = await getDocs(collection(db, "holds"));
+  sel.innerHTML = '<option value="">Select hold...</option>';
+  const docs = [];
+  snap.forEach(d => docs.push(d.data()));
+  docs.sort((a, b) => String(a.holdNo).localeCompare(String(b.holdNo), undefined, { numeric: true }));
+  docs.forEach(h => {
+    const opt = document.createElement("option");
+    opt.value = h.holdNo; opt.textContent = "Hold " + h.holdNo;
+    sel.appendChild(opt);
+  });
+}
 
-  const q = query(
-    collection(db, "deliveries"),
-    where("truckNumber", "==", truckNumber),
-    orderBy("createdAt", "desc"), limit(1)
-  );
-  const snap = await getDocs(q);
-  const box = document.getElementById("resultBox");
-  box.style.display = "none";
+let selectedDocId = null;
 
-  if (snap.empty) {
-    alert("Truck not found. Please check the truck number.");
-    return;
+// Show ONLY deliveries whose status is "Truck In"
+async function loadTruckInList() {
+  const body = document.getElementById("listBody");
+  body.innerHTML = "<tr><td colspan='4' style='padding:10px;'>Loading...</td></tr>";
+  document.getElementById("resultBox").style.display = "none";
+  selectedDocId = null;
+  try {
+    const q = query(collection(db, "deliveries"), orderBy("createdAt", "desc"), limit(100));
+    const snap = await getDocs(q);
+    const rows = [];
+    snap.forEach(dd => { const r = dd.data(); if (r.status === "Truck In") rows.push({ id: dd.id, ...r }); });
+    if (rows.length === 0) { body.innerHTML = "<tr><td colspan='4' style='padding:10px;color:#718096;'>No trucks waiting to be loaded.</td></tr>"; return; }
+    body.innerHTML = "";
+    rows.forEach(r => {
+      const tr = document.createElement("tr");
+      tr.style.cursor = "pointer";
+      tr.innerHTML =
+        `<td style="padding:10px;border-bottom:1px solid #edf2f7;">${r.deliveryNo || ""}</td>` +
+        `<td style="padding:10px;border-bottom:1px solid #edf2f7;">${r.truckNumber || ""}</td>` +
+        `<td style="padding:10px;border-bottom:1px solid #edf2f7;">${(Number(r.emptyWeight)||0).toFixed(0)}</td>` +
+        `<td style="padding:10px;border-bottom:1px solid #edf2f7;color:#2c5282;font-weight:700;">Select ›</td>`;
+      tr.addEventListener("click", () => selectTruck(r));
+      body.appendChild(tr);
+    });
+  } catch (err) {
+    console.error(err);
+    body.innerHTML = "<tr><td colspan='4' style='padding:10px;color:#c53030;'>Could not load list.</td></tr>";
   }
+}
 
-  const d = snap.docs[0];
-  const data = d.data();
-
-  if (data.status !== "Truck In") {
-    alert("⚠️ This truck cannot be picked right now. Current status: " + data.status);
-    return;
-  }
-
-  document.getElementById("resDeliveryNo").textContent = data.deliveryNo;
-  document.getElementById("resTruckNo").textContent = data.truckNumber;
-  document.getElementById("resEmptyWeight").textContent = data.emptyWeight;
+function selectTruck(r) {
+  selectedDocId = r.id;
+  document.getElementById("resDeliveryNo").textContent = r.deliveryNo || "";
+  document.getElementById("resTruckNo").textContent = r.truckNumber || "";
+  document.getElementById("resEmptyWeight").textContent = (Number(r.emptyWeight)||0).toFixed(0);
   document.getElementById("bagsInput").value = "";
   document.getElementById("estWeight").textContent = "0.00";
+  document.getElementById("holdSelect").value = "";
+  const box = document.getElementById("resultBox");
   box.style.display = "block";
-  box.dataset.docId = d.id;
-});
+  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
 
 document.getElementById("bagsInput").addEventListener("input", () => {
   const bags = Number(document.getElementById("bagsInput").value) || 0;
@@ -67,22 +92,31 @@ document.getElementById("bagsInput").addEventListener("input", () => {
 });
 
 document.getElementById("confirmLoadingBtn").addEventListener("click", async () => {
-  const box = document.getElementById("resultBox");
-  const docId = box.dataset.docId;
+  if (!selectedDocId) { alert("Please select a truck from the list first."); return; }
+  const hold = document.getElementById("holdSelect").value;
   const bags = Number(document.getElementById("bagsInput").value);
-  if (!bags) { alert("Please enter number of bags."); return; }
+  if (!hold) { alert("Please select the hold you loaded from."); return; }
+  if (!bags || bags <= 0) { alert("Please enter number of bags."); return; }
   if (!confirm("Confirm Pick for this truck?")) return;
 
-  await updateDoc(doc(db, "deliveries", docId), {
-    numberOfBags: bags,
-    status: "Loading Complete",
-    pickedBy: sessionStorage.getItem("employeeName") || "",
-    pickedAt: serverTimestamp()
-  });
-
-  alert("✅ Pick confirmed. Truck is ready for PGI at the weighbridge.");
-  box.style.display = "none";
-  document.getElementById("searchForm").reset();
+  const btn = document.getElementById("confirmLoadingBtn");
+  btn.disabled = true; btn.textContent = "Saving...";
+  try {
+    await updateDoc(doc(db, "deliveries", selectedDocId), {
+      numberOfBags: bags,
+      hold: hold,
+      status: "Loading Complete",
+      pickedBy: sessionStorage.getItem("employeeName") || "",
+      pickedAt: serverTimestamp()
+    });
+    alert("✅ Pick confirmed. Truck is ready for PGI at the weighbridge.");
+    loadTruckInList();
+  } catch (err) {
+    console.error(err);
+    alert("Error: " + err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = "✔ Pick";
+  }
 });
 </script>
 <style>
@@ -96,11 +130,9 @@ header h1{ font-size:17px; }
 .container{ max-width:700px; margin:24px auto; padding:0 16px; }
 .card{ background:#fff; border-radius:10px; padding:22px; box-shadow:0 2px 8px rgba(0,0,0,.06); margin-bottom:20px; }
 .card h2{ font-size:16px; color:#1e3a5f; margin-bottom:14px; }
-.form-row{ display:flex; gap:12px; align-items:end; flex-wrap:wrap; }
 .form-group{ flex:1; min-width:150px; }
 .form-group label{ display:block; font-size:13px; font-weight:600; margin-bottom:5px; }
 .form-group input{ width:100%; padding:10px 12px; border:1.5px solid #e2e8f0; border-radius:7px; font-size:14px; }
-.form-row button{ padding:10px 20px; background:#2c5282; color:#fff; border:none; border-radius:7px; cursor:pointer; font-weight:700; }
 .result-row{ display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #edf2f7; font-size:14px; }
 .result-row b{ color:#1e3a5f; }
 #confirmLoadingBtn{ width:100%; padding:12px; background:#2c5282; color:#fff; border:none; border-radius:8px; font-weight:700; cursor:pointer; margin-top:10px; }
@@ -119,20 +151,34 @@ header h1{ font-size:17px; }
   </header>
   <div class="container">
     <div class="card">
-      <h2>Search by Truck Number</h2>
-      <form id="searchForm" class="form-row">
-        <div class="form-group"><label>Truck No.</label><input type="text" id="truckNo" required></div>
-        <button type="submit">🔍 Search</button>
-      </form>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+        <h2 style="margin:0;">Trucks waiting to be loaded</h2>
+        <button id="refreshBtn" style="padding:8px 14px; background:#2c5282; color:#fff; border:none; border-radius:7px; cursor:pointer; font-weight:700; font-size:13px;">🔄 Refresh</button>
+      </div>
+      <div style="overflow-x:auto;">
+        <table style="width:100%; border-collapse:collapse; font-size:13px; min-width:420px;">
+          <thead><tr>
+            <th style="text-align:left; padding:10px; background:#f8fafc; color:#4a5568;">DN</th>
+            <th style="text-align:left; padding:10px; background:#f8fafc; color:#4a5568;">Truck</th>
+            <th style="text-align:left; padding:10px; background:#f8fafc; color:#4a5568;">Empty (kg)</th>
+            <th style="padding:10px; background:#f8fafc;"></th>
+          </tr></thead>
+          <tbody id="listBody"></tbody>
+        </table>
+      </div>
     </div>
 
     <div class="card" id="resultBox" style="display:none;">
-      <h2>Delivery Details</h2>
+      <h2>Selected Truck</h2>
       <div class="result-row"><span>Delivery No.</span><b id="resDeliveryNo"></b></div>
       <div class="result-row"><span>Truck No.</span><b id="resTruckNo"></b></div>
       <div class="result-row"><span>Empty Weight (kg)</span><b id="resEmptyWeight"></b></div>
       <div class="form-group" style="margin-top:12px;">
-        <label>Number of Bags</label>
+        <label>Hold No. (loaded from)</label>
+        <select id="holdSelect" style="width:100%; padding:10px 12px; border:1.5px solid #e2e8f0; border-radius:7px; font-size:14px;"></select>
+      </div>
+      <div class="form-group" style="margin-top:12px;">
+        <label>Number of Bags loaded</label>
         <input type="number" id="bagsInput">
       </div>
       <div class="result-row"><span>Estimated Weight (kg)</span><b id="estWeight">0.00</b></div>

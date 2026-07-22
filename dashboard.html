@@ -61,28 +61,17 @@ function buildMenu(role) {
 
 async function loadTargets() {
   try {
-    const sSnap = await getDocs(collection(db, "settings"));
-    if (sSnap.empty) { document.getElementById("targetsCard").style.display = "none"; }
-    const s = sSnap.empty ? {} : sSnap.docs[0].data();
+    const snap = await getDocs(collection(db, "settings"));
+    if (snap.empty) { document.getElementById("targetsCard").style.display = "none"; return; }
+    const s = snap.docs[0].data();
 
-    const [dSnap, hSnap] = await Promise.all([
-      getDocs(collection(db, "deliveries")),
-      getDocs(collection(db, "holds"))
-    ]);
-
+    const dSnap = await getDocs(collection(db, "deliveries"));
     let doneWeight = 0, doneBags = 0;
-    const perHold = {}; // holdNo -> { bags, kg } loaded so far
     dSnap.forEach(d => {
       const r = d.data();
-      if (r.status === "Reversed") return;
-      const bags = Number(r.numberOfBags) || 0;
-      const kg = Number(r.netWeight) || 0;
-      doneWeight += kg; doneBags += bags;
-      if (r.hold != null && r.hold !== "") {
-        if (!perHold[r.hold]) perHold[r.hold] = { bags: 0, kg: 0 };
-        perHold[r.hold].bags += bags;
-        perHold[r.hold].kg += kg;
-      }
+      if (r.status === "Reversed") return;   // reversed deliveries return their stock to remaining
+      doneWeight += Number(r.netWeight) || 0;
+      doneBags += Number(r.numberOfBags) || 0;
     });
 
     const targetWeight = Number(s.targetWeight) || 0;
@@ -92,33 +81,6 @@ async function loadTargets() {
     document.getElementById("remainWeight").textContent = ((targetWeight - doneWeight) / 1000).toFixed(2);
     document.getElementById("doneBags").textContent = doneBags;
     document.getElementById("remainBags").textContent = (targetBags - doneBags);
-
-    // ===== Per-hold breakdown =====
-    const holds = [];
-    hSnap.forEach(h => holds.push(h.data()));
-    holds.sort((a, b) => String(a.holdNo).localeCompare(String(b.holdNo), undefined, { numeric: true }));
-    const body = document.getElementById("holdProgressBody");
-    const cell = "padding:9px;border-bottom:1px solid #edf2f7;";
-    if (holds.length === 0) {
-      body.innerHTML = `<tr><td colspan='5' style='${cell}color:#718096;'>No holds defined.</td></tr>`;
-    } else {
-      body.innerHTML = "";
-      holds.forEach(h => {
-        const tBags = Number(h.bags) || 0;
-        const tKg = Number(h.weightKg) || 0;
-        const done = perHold[h.holdNo] || { bags: 0, kg: 0 };
-        const rBags = tBags - done.bags;
-        const rKg = (tKg - done.kg) / 1000;
-        const tr = document.createElement("tr");
-        tr.innerHTML =
-          `<td style="${cell}"><b>${h.holdNo}</b></td>` +
-          `<td style="${cell}">${done.bags} / ${tBags}</td>` +
-          `<td style="${cell}"><b>${rBags}</b></td>` +
-          `<td style="${cell}">${(done.kg / 1000).toFixed(2)} / ${(tKg / 1000).toFixed(2)}</td>` +
-          `<td style="${cell}"><b>${rKg.toFixed(2)}</b></td>`;
-        body.appendChild(tr);
-      });
-    }
   } catch (err) { console.error(err); document.getElementById("targetsCard").style.display = "none"; }
 }
 </script>
@@ -173,22 +135,6 @@ header h1{ font-size:18px; }
         <div class="stat remain"><div class="label">Weight Remaining (t)</div><div class="value" id="remainWeight">0</div></div>
         <div class="stat"><div class="label">Bags Done</div><div class="value" id="doneBags">0</div></div>
         <div class="stat remain"><div class="label">Bags Remaining</div><div class="value" id="remainBags">0</div></div>
-      </div>
-    </div>
-
-    <div class="card" id="holdProgressCard">
-      <h2>Per-Hold Progress</h2>
-      <div style="overflow-x:auto;">
-        <table style="width:100%; border-collapse:collapse; font-size:13px; min-width:520px;">
-          <thead><tr>
-            <th style="text-align:left; padding:9px; background:#f8fafc; color:#4a5568;">Hold</th>
-            <th style="text-align:left; padding:9px; background:#f8fafc; color:#4a5568;">Bags (loaded / target)</th>
-            <th style="text-align:left; padding:9px; background:#f8fafc; color:#4a5568;">Bags remaining</th>
-            <th style="text-align:left; padding:9px; background:#f8fafc; color:#4a5568;">Weight t (loaded / target)</th>
-            <th style="text-align:left; padding:9px; background:#f8fafc; color:#4a5568;">Weight remaining (t)</th>
-          </tr></thead>
-          <tbody id="holdProgressBody"></tbody>
-        </table>
       </div>
     </div>
 

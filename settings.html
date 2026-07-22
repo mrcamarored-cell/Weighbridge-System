@@ -24,6 +24,7 @@ async function initSettings() {
   await loadSettings();
   await loadTransporters();
   await loadVessels();
+  await loadHolds();
 }
 document.getElementById("logoutBtn").addEventListener("click", async () => { if(confirm("Sign out?")){ await signOut(auth); window.location.href="index.html"; }});
 document.getElementById("backBtn").addEventListener("click", () => window.location.href = "dashboard.html");
@@ -36,24 +37,70 @@ async function loadSettings() {
     const s = snap.docs[0].data();
     currentSettings = s;
     document.getElementById("bagWeight").value = s.bagWeight || "";
-    document.getElementById("targetWeight").value = s.targetWeight || "";
-    document.getElementById("targetBags").value = s.targetBags || "";
   }
 }
 
 document.getElementById("settingsForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const bagWeight = Number(document.getElementById("bagWeight").value) || 0;
-  const targetWeight = Number(document.getElementById("targetWeight").value) || 0;
-  const targetBags = Number(document.getElementById("targetBags").value) || 0;
 
   const id = settingsDocId || "main";
-  await setDoc(doc(db, "settings", id), { bagWeight, targetWeight, targetBags }, { merge: true });
+  await setDoc(doc(db, "settings", id), { bagWeight }, { merge: true });
   settingsDocId = id;
   currentSettings.bagWeight = bagWeight;
-  currentSettings.targetWeight = targetWeight;
-  currentSettings.targetBags = targetBags;
   alert("✅ Settings saved.");
+});
+
+// ===== Holds (target = sum of all holds) =====
+async function loadHolds() {
+  const tbody = document.getElementById("holdsTbody");
+  const snap = await getDocs(collection(db, "holds"));
+  tbody.innerHTML = "";
+  let sumBags = 0, sumKg = 0;
+  const docs = [];
+  snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
+  docs.sort((a, b) => String(a.holdNo).localeCompare(String(b.holdNo), undefined, { numeric: true }));
+
+  if (docs.length === 0) {
+    tbody.innerHTML = "<tr><td colspan='4' style='color:#718096;'>No holds added yet.</td></tr>";
+  } else {
+    docs.forEach(h => {
+      const bags = Number(h.bags) || 0;
+      const kg = Number(h.weightKg) || 0;
+      sumBags += bags; sumKg += kg;
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${h.holdNo}</td><td>${bags}</td><td>${(kg / 1000).toFixed(2)}</td>` +
+                     `<td><button class="delH" data-id="${h.id}">🗑</button></td>`;
+      tbody.appendChild(tr);
+    });
+  }
+
+  document.getElementById("holdTotalBags").textContent = sumBags;
+  document.getElementById("holdTotalWeight").textContent = (sumKg / 1000).toFixed(2);
+
+  // Target = sum of holds; stored in kg (consistent with net weights)
+  const id = settingsDocId || "main";
+  await setDoc(doc(db, "settings", id), { targetBags: sumBags, targetWeight: sumKg }, { merge: true });
+  settingsDocId = id;
+  currentSettings.targetBags = sumBags;
+  currentSettings.targetWeight = sumKg;
+
+  document.querySelectorAll(".delH").forEach(btn => btn.addEventListener("click", async () => {
+    if (confirm("Delete this hold?")) { await deleteDoc(doc(db, "holds", btn.dataset.id)); loadHolds(); }
+  }));
+}
+
+document.getElementById("holdForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const holdNo = document.getElementById("holdNo").value.trim();
+  const bags = Number(document.getElementById("holdBags").value) || 0;
+  const weightMt = Number(document.getElementById("holdWeight").value) || 0;
+  if (!holdNo) { alert("Please enter the hold number."); return; }
+  if (bags <= 0) { alert("Please enter the number of bags in this hold."); return; }
+  if (weightMt <= 0) { alert("Please enter the total weight (MT) of this hold."); return; }
+  await addDoc(collection(db, "holds"), { holdNo, bags, weightKg: weightMt * 1000 });
+  document.getElementById("holdForm").reset();
+  loadHolds();
 });
 
 // ===== Transporters =====
@@ -199,11 +246,31 @@ th,td{ padding:8px; text-align:left; border-bottom:1px solid #edf2f7; }
       <form id="settingsForm">
         <div class="grid">
           <div><label>Default Bag Weight (kg)</label><input type="number" id="bagWeight" required></div>
-          <div><label>Target Weight (kg)</label><input type="number" id="targetWeight" required></div>
-          <div><label>Target Bags</label><input type="number" id="targetBags" required></div>
         </div>
         <button type="submit">💾 Save Settings</button>
       </form>
+    </div>
+
+    <div class="card">
+      <h2>Holds — target is the sum of all holds</h2>
+      <form id="holdForm" class="grid">
+        <div><label>Hold No.</label><input type="text" id="holdNo" required></div>
+        <div><label>Bags in Hold</label><input type="number" id="holdBags" required></div>
+        <div><label>Total Weight (MT)</label><input type="number" step="any" id="holdWeight" required></div>
+        <div style="display:flex; align-items:end;"><button type="submit" style="width:100%;">➕ Add Hold</button></div>
+      </form>
+      <table style="margin-top:14px;">
+        <thead><tr>
+          <th style="text-align:left; padding:8px;">Hold</th>
+          <th style="text-align:left; padding:8px;">Bags</th>
+          <th style="text-align:left; padding:8px;">Weight (MT)</th>
+          <th style="padding:8px;"></th>
+        </tr></thead>
+        <tbody id="holdsTbody"></tbody>
+      </table>
+      <div style="margin-top:12px; padding:12px; background:#f0fff4; border:1px solid #c6f6d5; border-radius:8px; font-weight:700; color:#22543d;">
+        Target (sum): <span id="holdTotalBags">0</span> bags &nbsp;•&nbsp; <span id="holdTotalWeight">0</span> MT
+      </div>
     </div>
 
     <div class="card">
