@@ -40,6 +40,10 @@ function buildMenu(role) {
     items.push({ href:"loading.html", icon:"📦", title:"Stevedore", desc:"Record bags loaded" });
     items.push({ href:"shift-report.html", icon:"📝", title:"Shift Loading Report", desc:"Generate & download PDF" });
   }
+
+  if (["admin","loading","viewer","supervisor"].includes(role)) {
+    items.push({ href:"stowage-plan.html", icon:"🚢", title:"Stowage Plan", desc:"Loading sequence by hold" });
+  }
   if (["warehouse", "admin"].includes(role)) {
     items.push({ href:"warehouse.html", icon:"🏬", title:"Warehouse Receiving", desc:"Confirm receipt" });
   }
