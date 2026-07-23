@@ -61,7 +61,7 @@ function selectDelivery(data, docId) {
   document.getElementById("resTruckNo").textContent = data.truckNumber || "";
   document.getElementById("resGross").textContent = data.grossWeight ?? "—";
   document.getElementById("resNet").textContent = (Number(data.netWeight)||0).toFixed(2);
-  document.getElementById("resBagsInput").textContent = data.numberOfBags || 0;
+  document.getElementById("resBagsInput").value = data.numberOfBags || "";
   const box = document.getElementById("resultBox");
   box.style.display = "block";
   box.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -88,9 +88,10 @@ document.getElementById("searchForm").addEventListener("submit", async (e) => {
 });
 
 document.getElementById("confirmReceiptBtn").addEventListener("click", async () => {
-  if (!selectedDocId || !selectedData) { alert("Please select a truck first."); return; }
-  const bags = Number(selectedData.numberOfBags) || 0;
-  if (!confirm("Confirm receipt of this delivery (" + bags + " bags)?")) return;
+  if (!selectedDocId) { alert("Please select a truck first."); return; }
+  const bags = Number(document.getElementById("resBagsInput").value) || 0;
+  if (!bags) { alert("Please confirm the number of bags."); return; }
+  if (!confirm("Confirm receipt of this delivery?")) return;
 
   const btn = document.getElementById("confirmReceiptBtn");
   btn.disabled = true; btn.textContent = "Saving...";
@@ -198,8 +199,10 @@ header h1{ font-size:17px; }
       <div class="result-row"><span>Truck No.</span><b id="resTruckNo"></b></div>
       <div class="result-row"><span>Gross Weight</span><b id="resGross"></b></div>
       <div class="result-row"><span>Net Weight (kg)</span><b id="resNet"></b></div>
-      <div class="result-row"><span>Number of Bags (from PGI)</span><b id="resBagsInput"></b></div>
-      <p style="font-size:12px; color:#718096; margin-top:10px;">Check the bags against the load. If they match, confirm the receipt. If they don't match, reverse the truck below — corrections are made at the weighbridge.</p>
+      <div class="form-group" style="margin-top:12px;">
+        <label>Confirm Number of Bags *</label>
+        <input type="number" id="resBagsInput">
+      </div>
       <button id="confirmReceiptBtn">✔ Confirm Receipt (Received)</button>
 
       <div style="border-top:1px solid #edf2f7; margin-top:18px; padding-top:14px;">
