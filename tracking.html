@@ -50,12 +50,15 @@ function startListening() {
       }
 
       const date = r.createdAt ? r.createdAt.toDate().toLocaleString("en-US") : "—";
+      const revBadge = r.reversedIndicator
+        ? ' <span title="This truck was reversed to a previous step" style="background:#fed7d7; color:#c53030; padding:2px 7px; border-radius:5px; font-size:11px; font-weight:700; white-space:nowrap;">⤶ Reversed</span>'
+        : "";
       const tr = document.createElement("tr");
       tr.style.background = statusColors[r.status] || "#fff";
       tr.innerHTML = `
         <td>${r.deliveryNo || ""}</td>
         <td>${r.truckNumber || ""}</td>
-        <td>${statusText[r.status] || r.status}</td>
+        <td>${statusText[r.status] || r.status}${revBadge}</td>
         <td>${r.numberOfBags || 0}</td>
         <td>${((Number(r.netWeight)||0)/1000).toFixed(3)}</td>
         <td>${r.transporter || ""}</td>
@@ -110,7 +113,8 @@ th{ background:#f8fafc; color:#4a5568; position:sticky; top:0; }
         <thead><tr><th>Delivery No.</th><th>Truck No.</th><th>Status</th><th>Bags</th><th>Net (MT)</th><th>Transporter</th><th>Time</th></tr></thead>
         <tbody id="tbody"></tbody>
       </table>
-      <p style="font-size:12px; color:#718096; margin-top:12px;">Note: all figures are based on weighbridge (PGI) operations — nothing is counted or deducted until PGI is confirmed.</p>
+      <p style="font-size:12px; color:#718096; margin-top:12px;"><span style="background:#fed7d7; color:#c53030; padding:2px 7px; border-radius:5px; font-size:11px; font-weight:700;">⤶ Reversed</span> = this truck was sent back to a previous step at some point.</p>
+      <p style="font-size:12px; color:#718096; margin-top:8px;">Note: all figures are based on weighbridge (PGI) operations — nothing is counted or deducted until PGI is confirmed.</p>
     </div>
   </div>
 </div>
