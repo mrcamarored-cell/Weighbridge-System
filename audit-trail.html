@@ -74,26 +74,85 @@ function filtered() {
   });
 }
 
+let viewMode = "delivery";   // "delivery" = horizontal per DN, "movement" = flat list
+
+document.getElementById("viewDelivery").addEventListener("click", () => setView("delivery"));
+document.getElementById("viewMovement").addEventListener("click", () => setView("movement"));
+function setView(m) {
+  viewMode = m;
+  document.getElementById("viewDelivery").classList.toggle("active", m === "delivery");
+  document.getElementById("viewMovement").classList.toggle("active", m === "movement");
+  render();
+}
+
+function fmtDate(r) { const d = (r.at && r.at.toDate) ? r.at.toDate() : null; return d ? d.toLocaleDateString("en-GB") : "—"; }
+function fmtTime(r) { const d = (r.at && r.at.toDate) ? r.at.toDate() : null; return d ? d.toLocaleTimeString("en-GB") : "—"; }
+function ms(r) { return (r.at && r.at.toMillis) ? r.at.toMillis() : 0; }
+
+// Group movements by delivery, oldest first inside each group
+function groupByDelivery(rows) {
+  const g = {};
+  rows.forEach(r => {
+    const key = r.deliveryNo || "(system)";
+    if (!g[key]) g[key] = { deliveryNo: r.deliveryNo || "(system)", truckNumber: r.truckNumber || "", moves: [] };
+    if (r.truckNumber && !g[key].truckNumber) g[key].truckNumber = r.truckNumber;
+    g[key].moves.push(r);
+  });
+  const list = Object.values(g);
+  list.forEach(x => x.moves.sort((a, b) => ms(a) - ms(b)));
+  list.sort((a, b) => ms(b.moves[b.moves.length - 1]) - ms(a.moves[a.moves.length - 1]));
+  return list;
+}
+
 function render() {
   const rows = filtered();
+  const head = document.getElementById("thead");
   const body = document.getElementById("tbody");
   const c = "padding:9px;border-bottom:1px solid #edf2f7;";
-  body.innerHTML = "";
   document.getElementById("countLabel").textContent = rows.length + " movement(s)";
-  if (rows.length === 0) { body.innerHTML = `<tr><td colspan='7' style='${c}color:#718096;'>No movements match these filters.</td></tr>`; return; }
-  rows.forEach(r => {
-    const d = (r.at && r.at.toDate) ? r.at.toDate() : null;
-    const date = d ? d.toLocaleDateString("en-GB") : "—";
-    const time = d ? d.toLocaleTimeString("en-GB") : "—";
+  head.innerHTML = ""; body.innerHTML = "";
+
+  if (viewMode === "movement") {
+    head.innerHTML = "<th>Date</th><th>Time</th><th>Action</th><th>DN</th><th>Truck</th><th>User</th><th>Details</th>";
+    if (rows.length === 0) { body.innerHTML = `<tr><td colspan='7' style='${c}color:#718096;'>No movements match these filters.</td></tr>`; return; }
+    rows.forEach(r => {
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        `<td style="${c}">${fmtDate(r)}</td><td style="${c}">${fmtTime(r)}</td>` +
+        `<td style="${c}"><span style="background:${actionColors[r.action] || '#edf2f7'}; padding:3px 8px; border-radius:5px; font-weight:600;">${r.action || ""}</span></td>` +
+        `<td style="${c}">${r.deliveryNo || "—"}</td><td style="${c}">${r.truckNumber || "—"}</td>` +
+        `<td style="${c}"><b>${r.byUser || "—"}</b></td>` +
+        `<td style="${c}">${(r.fromStatus || "") + (r.toStatus ? " → " + r.toStatus : "")}${r.reason ? '<br><span style="color:#c53030;font-size:12px;">' + r.reason + '</span>' : ""}</td>`;
+      body.appendChild(tr);
+    });
+    return;
+  }
+
+  // ===== Horizontal: one row per delivery, movements repeat across =====
+  const groups = groupByDelivery(rows);
+  const maxMoves = groups.reduce((m, g) => Math.max(m, g.moves.length), 0) || 1;
+  let h = "<th>DN</th><th>Truck</th>";
+  for (let i = 1; i <= maxMoves; i++) {
+    h += `<th style="border-left:2px solid #cbd5e0;">Date ${i}</th><th>Time ${i}</th><th>Action ${i}</th><th>User ${i}</th>`;
+  }
+  head.innerHTML = h;
+
+  const totalCols = 2 + maxMoves * 4;
+  if (groups.length === 0) { body.innerHTML = `<tr><td colspan='${totalCols}' style='${c}color:#718096;'>No movements match these filters.</td></tr>`; return; }
+
+  groups.forEach(g => {
     const tr = document.createElement("tr");
-    tr.innerHTML =
-      `<td style="${c}">${date}</td>` +
-      `<td style="${c}">${time}</td>` +
-      `<td style="${c}"><span style="background:${actionColors[r.action] || '#edf2f7'}; padding:3px 8px; border-radius:5px; font-weight:600;">${r.action || ""}</span></td>` +
-      `<td style="${c}">${r.deliveryNo || "—"}</td>` +
-      `<td style="${c}">${r.truckNumber || "—"}</td>` +
-      `<td style="${c}"><b>${r.byUser || "—"}</b></td>` +
-      `<td style="${c}">${(r.fromStatus || "") + (r.toStatus ? " → " + r.toStatus : "")}${r.reason ? '<br><span style="color:#c53030;font-size:12px;">' + r.reason + '</span>' : ""}</td>`;
+    let html = `<td style="${c}"><b>${g.deliveryNo}</b></td><td style="${c}">${g.truckNumber || "—"}</td>`;
+    for (let i = 0; i < maxMoves; i++) {
+      const r = g.moves[i];
+      if (!r) { html += `<td style="${c}border-left:2px solid #cbd5e0;"></td><td style="${c}"></td><td style="${c}"></td><td style="${c}"></td>`; continue; }
+      const reason = r.reason ? `<br><span style="color:#c53030;font-size:11px;">${r.reason}</span>` : "";
+      html += `<td style="${c}border-left:2px solid #cbd5e0;white-space:nowrap;">${fmtDate(r)}</td>` +
+              `<td style="${c}white-space:nowrap;">${fmtTime(r)}</td>` +
+              `<td style="${c}"><span style="background:${actionColors[r.action] || '#edf2f7'}; padding:3px 8px; border-radius:5px; font-weight:600; white-space:nowrap;">${r.action || ""}</span>${reason}</td>` +
+              `<td style="${c}"><b>${r.byUser || "—"}</b></td>`;
+    }
+    tr.innerHTML = html;
     body.appendChild(tr);
   });
 }
@@ -101,20 +160,27 @@ function render() {
 document.getElementById("exportBtn").addEventListener("click", () => {
   const rows = filtered();
   if (rows.length === 0) { alert("Nothing to export."); return; }
-  const data = rows.map(r => {
-    const d = (r.at && r.at.toDate) ? r.at.toDate() : null;
-    return {
-      Date: d ? d.toLocaleDateString("en-GB") : "",
-      Time: d ? d.toLocaleTimeString("en-GB") : "",
-      Action: r.action || "",
-      "Delivery No": r.deliveryNo || "",
-      Truck: r.truckNumber || "",
-      User: r.byUser || "",
-      From: r.fromStatus || "",
-      To: r.toStatus || "",
-      Reason: r.reason || ""
-    };
-  });
+  let data;
+  if (viewMode === "movement") {
+    data = rows.map(r => ({
+      Date: fmtDate(r), Time: fmtTime(r), Action: r.action || "",
+      "Delivery No": r.deliveryNo || "", Truck: r.truckNumber || "", User: r.byUser || "",
+      From: r.fromStatus || "", To: r.toStatus || "", Reason: r.reason || ""
+    }));
+  } else {
+    data = groupByDelivery(rows).map(g => {
+      const row = { "Delivery No": g.deliveryNo, Truck: g.truckNumber || "" };
+      g.moves.forEach((r, i) => {
+        const n = i + 1;
+        row["Date " + n] = fmtDate(r);
+        row["Time " + n] = fmtTime(r);
+        row["Action " + n] = r.action || "";
+        row["User " + n] = r.byUser || "";
+        if (r.reason) row["Reason " + n] = r.reason;
+      });
+      return row;
+    });
+  }
   const ws = XLSX.utils.json_to_sheet(data);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Audit Trail");
@@ -139,6 +205,8 @@ header h1{ font-size:17px; }
 .btn{ padding:11px 20px; background:#2c5282; color:#fff; border:none; border-radius:7px; cursor:pointer; font-weight:700; }
 .btn.green{ background:#22543d; }
 .btn.grey{ background:#718096; }
+.view-btn{ background:#e2e8f0; color:#4a5568; }
+.view-btn.active{ background:#2c5282; color:#fff; }
 table{ width:100%; border-collapse:collapse; font-size:13px; }
 th{ background:#f8fafc; color:#4a5568; padding:9px; text-align:left; white-space:nowrap; }
 </style>
@@ -184,15 +252,15 @@ th{ background:#f8fafc; color:#4a5568; padding:9px; text-align:left; white-space
       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
         <h2 style="margin:0;">Movements — <span id="countLabel" style="font-weight:400; font-size:13px; color:#718096;">0</span></h2>
         <div>
+          <button id="viewDelivery" class="btn view-btn active">↔ By Delivery</button>
+          <button id="viewMovement" class="btn view-btn">☰ By Movement</button>
           <button id="refreshBtn" class="btn">🔄 Refresh</button>
           <button id="exportBtn" class="btn green">⬇ Export Excel</button>
         </div>
       </div>
       <div style="overflow-x:auto;">
         <table style="min-width:900px;">
-          <thead><tr>
-            <th>Date</th><th>Time</th><th>Action</th><th>DN</th><th>Truck</th><th>User</th><th>Details</th>
-          </tr></thead>
+          <thead><tr id="thead"></tr></thead>
           <tbody id="tbody"></tbody>
         </table>
       </div>
