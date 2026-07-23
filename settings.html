@@ -111,7 +111,18 @@ document.getElementById("holdForm").addEventListener("submit", async (e) => {
   loadHolds();
 });
 
-// ===== Danger zone: purge delivery records =====
+// ===== Danger zone: purge records / factory reset =====
+async function wipeCollection(name, filterFn) {
+  const snap = await getDocs(collection(db, name));
+  let n = 0;
+  for (const d of snap.docs) {
+    if (filterFn && !filterFn(d.data())) continue;
+    await deleteDoc(doc(db, name, d.id));
+    n++;
+  }
+  return n;
+}
+
 document.getElementById("purgeBtn").addEventListener("click", async () => {
   const scope = document.getElementById("purgeScope").value;
   const pw = document.getElementById("purgePassword").value;
@@ -124,25 +135,35 @@ document.getElementById("purgeBtn").addEventListener("click", async () => {
   const v = await verifyPassword(adminUser.email, pw);
   if (!v.ok) { alert(v.reason); return; }
 
-  const what = scope === "vessel" ? ('all delivery records for vessel "' + vessel + '"') : "ALL delivery records for ALL vessels";
+  const what = scope === "vessel"
+    ? ('all delivery records and holds for vessel "' + vessel + '"')
+    : "EVERYTHING (deliveries, trucks, holds, vessels, transporters, employees, notes, audit log). Only user accounts are kept";
   if (!confirm("This will permanently delete " + what + ".\n\nThis cannot be undone. Continue?")) return;
-  if (!confirm("Last confirmation — delete " + what + "?")) return;
+  if (!confirm("Last confirmation — proceed with the deletion?")) return;
 
   const btn = document.getElementById("purgeBtn");
   btn.disabled = true; btn.textContent = "Deleting...";
   try {
-    const snap = await getDocs(collection(db, "deliveries"));
-    let n = 0;
-    for (const d of snap.docs) {
-      const r = d.data();
-      if (scope === "vessel" && (r.vessel || "") !== vessel) continue;
-      await deleteDoc(doc(db, "deliveries", d.id));
-      n++;
+    let total = 0;
+    if (scope === "vessel") {
+      total += await wipeCollection("deliveries", r => (r.vessel || "") === vessel);
+      total += await wipeCollection("holds", r => (r.vessel || "") === vessel);
+    } else {
+      // Factory reset — every collection except "users"
+      for (const c of ["deliveries", "trucks", "holds", "vessels", "transporters", "employees", "shiftNotes", "auditLog", "counters"]) {
+        total += await wipeCollection(c);
+      }
+      // reset the settings document (keeps default bag weight)
+      const id = settingsDocId || "main";
+      await setDoc(doc(db, "settings", id), { currentVessel: "", currentTransporter: "", targetBags: 0, targetWeight: 0 }, { merge: true });
+      currentSettings.currentVessel = ""; currentSettings.currentTransporter = "";
+      currentSettings.targetBags = 0; currentSettings.targetWeight = 0;
     }
-    await logAudit({ action: "Purge Records", reason: what, byUser: adminUser.email, fromStatus: String(n) + " records" });
-    alert("✅ Deleted " + n + " delivery record(s).");
+    await logAudit({ action: scope === "vessel" ? "Purge Vessel Records" : "Factory Reset", reason: what, byUser: adminUser.email, fromStatus: String(total) + " documents" });
+    alert("✅ Deleted " + total + " record(s).");
     document.getElementById("purgePassword").value = "";
     document.getElementById("purgeConfirm").value = "";
+    await initSettings();
   } catch (e) { alert("Error: " + e.message); }
   finally { btn.disabled = false; btn.textContent = "🗑 Delete Records"; }
 });
@@ -365,13 +386,13 @@ th,td{ padding:8px; text-align:left; border-bottom:1px solid #edf2f7; }
     </div>
 
     <div class="card" style="border:2px solid #fed7d7;">
-      <h2 style="color:#c53030;">⚠️ Danger Zone — Delete Delivery Records</h2>
-      <p style="font-size:12px; color:#718096; margin-bottom:12px;">Permanently deletes delivery records. Vessels, holds, trucks, transporters and employees are NOT affected. This cannot be undone.</p>
+      <h2 style="color:#c53030;">⚠️ Danger Zone</h2>
+      <p style="font-size:12px; color:#718096; margin-bottom:12px;"><b>Current vessel only:</b> deletes that vessel's deliveries and holds.<br><b>Factory reset:</b> deletes deliveries, trucks, holds, vessels, transporters, employees, notes and audit log — <b>user accounts are kept</b>. Cannot be undone.</p>
       <div class="grid">
         <div><label>Scope</label>
           <select id="purgeScope">
             <option value="vessel">Current vessel only</option>
-            <option value="all">ALL vessels (everything)</option>
+            <option value="all">Factory reset (everything except users)</option>
           </select>
         </div>
         <div><label>Your login password</label><input type="password" id="purgePassword"></div>
