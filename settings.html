@@ -7,14 +7,16 @@
 <script type="module">
 import {
   requireAuth, requireRole, signOut, auth, db,
-  collection, addDoc, getDocs, deleteDoc, doc, setDoc
+  collection, addDoc, getDocs, deleteDoc, doc, setDoc, verifyPassword, logAudit
 } from "./firebase-config.js";
 
 let settingsDocId = null;
 let currentSettings = {};
+let adminUser = null;
 
 requireAuth((user, profile) => {
   if (!requireRole(profile, ["admin"])) return;
+  adminUser = user;
   document.getElementById("loadingScreen").style.display = "none";
   document.getElementById("mainContent").style.display = "block";
   initSettings();
@@ -54,15 +56,19 @@ document.getElementById("settingsForm").addEventListener("submit", async (e) => 
 // ===== Holds (target = sum of all holds) =====
 async function loadHolds() {
   const tbody = document.getElementById("holdsTbody");
+  const vessel = currentSettings.currentVessel || "";
+  document.getElementById("holdVesselName").textContent = vessel || "(no vessel selected)";
   const snap = await getDocs(collection(db, "holds"));
   tbody.innerHTML = "";
   let sumBags = 0, sumKg = 0;
   const docs = [];
-  snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
+  snap.forEach(d => { const h = d.data(); if ((h.vessel || "") === vessel) docs.push({ id: d.id, ...h }); });
   docs.sort((a, b) => String(a.holdNo).localeCompare(String(b.holdNo), undefined, { numeric: true }));
 
-  if (docs.length === 0) {
-    tbody.innerHTML = "<tr><td colspan='4' style='color:#718096;'>No holds added yet.</td></tr>";
+  if (!vessel) {
+    tbody.innerHTML = "<tr><td colspan='4' style='color:#c53030;'>Select a Current Vessel below first.</td></tr>";
+  } else if (docs.length === 0) {
+    tbody.innerHTML = "<tr><td colspan='4' style='color:#718096;'>No holds for this vessel yet.</td></tr>";
   } else {
     docs.forEach(h => {
       const bags = Number(h.bags) || 0;
@@ -92,15 +98,53 @@ async function loadHolds() {
 
 document.getElementById("holdForm").addEventListener("submit", async (e) => {
   e.preventDefault();
+  const vessel = currentSettings.currentVessel || "";
+  if (!vessel) { alert("Please select and save a Current Vessel first — holds belong to a vessel."); return; }
   const holdNo = document.getElementById("holdNo").value.trim();
   const bags = Number(document.getElementById("holdBags").value) || 0;
   const weightMt = Number(document.getElementById("holdWeight").value) || 0;
   if (!holdNo) { alert("Please enter the hold number."); return; }
   if (bags <= 0) { alert("Please enter the number of bags in this hold."); return; }
   if (weightMt <= 0) { alert("Please enter the total weight (MT) of this hold."); return; }
-  await addDoc(collection(db, "holds"), { holdNo, bags, weightKg: weightMt * 1000 });
+  await addDoc(collection(db, "holds"), { holdNo, bags, weightKg: weightMt * 1000, vessel });
   document.getElementById("holdForm").reset();
   loadHolds();
+});
+
+// ===== Danger zone: purge delivery records =====
+document.getElementById("purgeBtn").addEventListener("click", async () => {
+  const scope = document.getElementById("purgeScope").value;
+  const pw = document.getElementById("purgePassword").value;
+  const typed = document.getElementById("purgeConfirm").value.trim();
+  const vessel = currentSettings.currentVessel || "";
+
+  if (scope === "vessel" && !vessel) { alert("No current vessel selected."); return; }
+  if (!pw) { alert("Please enter your login password."); return; }
+  if (typed !== "DELETE") { alert('Please type DELETE in the confirmation box.'); return; }
+  const v = await verifyPassword(adminUser.email, pw);
+  if (!v.ok) { alert(v.reason); return; }
+
+  const what = scope === "vessel" ? ('all delivery records for vessel "' + vessel + '"') : "ALL delivery records for ALL vessels";
+  if (!confirm("This will permanently delete " + what + ".\n\nThis cannot be undone. Continue?")) return;
+  if (!confirm("Last confirmation — delete " + what + "?")) return;
+
+  const btn = document.getElementById("purgeBtn");
+  btn.disabled = true; btn.textContent = "Deleting...";
+  try {
+    const snap = await getDocs(collection(db, "deliveries"));
+    let n = 0;
+    for (const d of snap.docs) {
+      const r = d.data();
+      if (scope === "vessel" && (r.vessel || "") !== vessel) continue;
+      await deleteDoc(doc(db, "deliveries", d.id));
+      n++;
+    }
+    await logAudit({ action: "Purge Records", reason: what, byUser: adminUser.email, fromStatus: String(n) + " records" });
+    alert("✅ Deleted " + n + " delivery record(s).");
+    document.getElementById("purgePassword").value = "";
+    document.getElementById("purgeConfirm").value = "";
+  } catch (e) { alert("Error: " + e.message); }
+  finally { btn.disabled = false; btn.textContent = "🗑 Delete Records"; }
 });
 
 // ===== Transporters =====
@@ -175,7 +219,8 @@ document.getElementById("currentShipmentForm").addEventListener("submit", async 
   settingsDocId = id;
   currentSettings.currentTransporter = currentTransporter;
   currentSettings.currentVessel = currentVessel;
-  alert("✅ Current shipment saved.");
+  await loadHolds();
+  alert("✅ Current shipment saved. Holds and totals now apply to: " + (currentVessel || "(none)"));
 });
 
 // ===== Employees (Employee ID -> Name) =====
@@ -253,6 +298,7 @@ th,td{ padding:8px; text-align:left; border-bottom:1px solid #edf2f7; }
 
     <div class="card">
       <h2>Holds — target is the sum of all holds</h2>
+      <p style="font-size:13px; color:#2c5282; font-weight:600; margin-bottom:12px;">Vessel: <span id="holdVesselName">—</span></p>
       <form id="holdForm" class="grid">
         <div><label>Hold No.</label><input type="text" id="holdNo" required></div>
         <div><label>Bags in Hold</label><input type="number" id="holdBags" required></div>
@@ -316,6 +362,22 @@ th,td{ padding:8px; text-align:left; border-bottom:1px solid #edf2f7; }
         <button type="submit">➕ Add</button>
       </form>
       <table><tbody id="employeeTbody"></tbody></table>
+    </div>
+
+    <div class="card" style="border:2px solid #fed7d7;">
+      <h2 style="color:#c53030;">⚠️ Danger Zone — Delete Delivery Records</h2>
+      <p style="font-size:12px; color:#718096; margin-bottom:12px;">Permanently deletes delivery records. Vessels, holds, trucks, transporters and employees are NOT affected. This cannot be undone.</p>
+      <div class="grid">
+        <div><label>Scope</label>
+          <select id="purgeScope">
+            <option value="vessel">Current vessel only</option>
+            <option value="all">ALL vessels (everything)</option>
+          </select>
+        </div>
+        <div><label>Your login password</label><input type="password" id="purgePassword"></div>
+        <div><label>Type DELETE to confirm</label><input type="text" id="purgeConfirm" placeholder="DELETE"></div>
+      </div>
+      <button id="purgeBtn" style="margin-top:12px; background:#c53030;">🗑 Delete Records</button>
     </div>
   </div>
 </div>

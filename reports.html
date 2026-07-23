@@ -9,9 +9,17 @@
 import { requireAuth, signOut, auth, db, collection, query, where, orderBy, getDocs, Timestamp }
   from "./firebase-config.js";
 
-requireAuth((user, profile) => {
+let reportVessel = "";
+
+requireAuth(async (user, profile) => {
   document.getElementById("loadingScreen").style.display = "none";
   document.getElementById("mainContent").style.display = "block";
+  try {
+    const s = await getDocs(collection(db, "settings"));
+    if (!s.empty) reportVessel = s.docs[0].data().currentVessel || "";
+  } catch (e) { console.error(e); }
+  const vEl = document.getElementById("repVesselName");
+  if (vEl) vEl.textContent = reportVessel || "(no vessel selected)";
 });
 document.getElementById("logoutBtn").addEventListener("click", async () => { if(confirm("Sign out?")){ await signOut(auth); window.location.href="index.html"; }});
 document.getElementById("backBtn").addEventListener("click", () => window.location.href = "dashboard.html");
@@ -52,7 +60,7 @@ document.getElementById("dateForm").addEventListener("submit", async (e) => {
   );
   const snap = await getDocs(q);
   currentRecords = [];
-  snap.forEach(d => currentRecords.push(d.data()));
+  snap.forEach(d => { const r = d.data(); if ((r.vessel || "") === reportVessel) currentRecords.push(r); });
   renderResults(currentRecords);
 });
 
@@ -160,7 +168,7 @@ th{ background:#f8fafc; color:#4a5568; }
 <div id="loadingScreen">Checking session...</div>
 <div id="mainContent">
   <header>
-    <h1>📊 Reports</h1>
+    <h1>📊 Reports — <span id="repVesselName" style="font-weight:400; font-size:14px;">—</span></h1>
     <div class="header-actions">
       <button id="backBtn">↩ Main Menu</button>
       <button id="logoutBtn">Sign Out</button>

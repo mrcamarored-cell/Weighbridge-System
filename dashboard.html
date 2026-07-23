@@ -65,6 +65,9 @@ async function loadTargets() {
     const sSnap = await getDocs(collection(db, "settings"));
     if (sSnap.empty) { document.getElementById("targetsCard").style.display = "none"; }
     const s = sSnap.empty ? {} : sSnap.docs[0].data();
+    const curVessel = s.currentVessel || "";
+    const vEl = document.getElementById("dashVessel");
+    if (vEl) vEl.textContent = curVessel || "(no vessel selected)";
 
     const [dSnap, hSnap] = await Promise.all([
       getDocs(collection(db, "deliveries")),
@@ -76,6 +79,7 @@ async function loadTargets() {
     dSnap.forEach(d => {
       const r = d.data();
       if (r.status === "Reversed") return;
+      if ((r.vessel || "") !== curVessel) return;   // only the current vessel's records
       const bags = Number(r.numberOfBags) || 0;
       const kg = Number(r.netWeight) || 0;
       doneWeight += kg; doneBags += bags;
@@ -96,7 +100,7 @@ async function loadTargets() {
 
     // ===== Per-hold breakdown =====
     const holds = [];
-    hSnap.forEach(h => holds.push(h.data()));
+    hSnap.forEach(h => { const d = h.data(); if ((d.vessel || "") === curVessel) holds.push(d); });
     holds.sort((a, b) => String(a.holdNo).localeCompare(String(b.holdNo), undefined, { numeric: true }));
     const body = document.getElementById("holdProgressBody");
     const cell = "padding:9px;border-bottom:1px solid #edf2f7;";
@@ -179,6 +183,7 @@ header h1{ font-size:18px; }
 
     <div class="card" id="holdProgressCard">
       <h2>Per-Hold Progress</h2>
+      <p style="font-size:13px; color:#2c5282; font-weight:600; margin-bottom:12px;">Vessel: <span id="dashVessel">—</span></p>
       <div style="overflow-x:auto;">
         <table style="width:100%; border-collapse:collapse; font-size:13px; min-width:520px;">
           <thead><tr>

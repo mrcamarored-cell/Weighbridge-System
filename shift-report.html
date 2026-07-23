@@ -46,7 +46,7 @@ async function loadMeta() {
   if (!sSnap.empty) currentVessel = sSnap.docs[0].data().currentVessel || "";
   const hSnap = await getDocs(collection(db, "holds"));
   holdsData = [];
-  hSnap.forEach(d => holdsData.push(d.data()));
+  hSnap.forEach(d => { const h = d.data(); if ((h.vessel || "") === currentVessel) holdsData.push(h); });
   holdsData.sort((a, b) => String(a.holdNo).localeCompare(String(b.holdNo), undefined, { numeric: true }));
   const sel = document.getElementById("remarkHold");
   sel.innerHTML = '<option value="">General (no hold)</option>';
@@ -70,6 +70,7 @@ document.getElementById("reportFilterForm").addEventListener("submit", async (e)
   dSnap.forEach(dd => {
     const r = dd.data();
     if (r.status === "Reversed" || !r.hold) return;
+    if ((r.vessel || "") !== currentVessel) return;   // current vessel only
     if (r.status !== "Truck Out" && r.status !== "Completed") return; // only PGI-done deliveries count
     const bags = Number(r.numberOfBags) || 0;
     const kg = Number(r.netWeight) || 0;

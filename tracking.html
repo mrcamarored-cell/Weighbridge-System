@@ -5,12 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Live Tracking</title>
 <script type="module">
-import { requireAuth, signOut, auth, db, collection, query, orderBy, limit, onSnapshot }
+import { requireAuth, signOut, auth, db, collection, query, orderBy, limit, onSnapshot, getDocs }
   from "./firebase-config.js";
 
-requireAuth((user, profile) => {
+let trackVessel = "";
+
+requireAuth(async (user, profile) => {
   document.getElementById("loadingScreen").style.display = "none";
   document.getElementById("mainContent").style.display = "block";
+  try {
+    const s = await getDocs(collection(db, "settings"));
+    if (!s.empty) trackVessel = s.docs[0].data().currentVessel || "";
+  } catch (e) { console.error(e); }
+  const vEl = document.getElementById("trackVesselName");
+  if (vEl) vEl.textContent = trackVessel || "(no vessel selected)";
   startListening();
 });
 document.getElementById("logoutBtn").addEventListener("click", async () => { if(confirm("Sign out?")){ await signOut(auth); window.location.href="index.html"; }});
@@ -34,6 +42,7 @@ function startListening() {
 
     snap.forEach(d => {
       const r = d.data();
+      if ((r.vessel || "") !== trackVessel) return;   // current vessel only
       if (r.status !== "Reversed") {
         count++;
         totalWeight += Number(r.netWeight) || 0;
@@ -84,7 +93,7 @@ th{ background:#f8fafc; color:#4a5568; position:sticky; top:0; }
 <div id="loadingScreen">Checking session...</div>
 <div id="mainContent">
   <header>
-    <h1>📍 Live Tracking</h1>
+    <h1>📍 Live Tracking — <span id="trackVesselName" style="font-weight:400; font-size:14px;">—</span></h1>
     <div class="header-actions">
       <button id="backBtn">↩ Main Menu</button>
       <button id="logoutBtn">Sign Out</button>
