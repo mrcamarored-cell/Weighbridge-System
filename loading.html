@@ -107,6 +107,7 @@ document.getElementById("confirmLoadingBtn").addEventListener("click", async () 
       numberOfBags: bags,
       hold: hold,
       status: "Loading Complete",
+      reversedIndicator: false,   // cleared: truck moved forward again
       pickedBy: sessionStorage.getItem("employeeName") || "",
       pickedAt: serverTimestamp()
     });

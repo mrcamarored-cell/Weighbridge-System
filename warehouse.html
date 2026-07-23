@@ -97,6 +97,7 @@ document.getElementById("confirmReceiptBtn").addEventListener("click", async () 
   try {
     await updateDoc(doc(db, "deliveries", selectedDocId), {
       status: "Completed",
+      reversedIndicator: false,   // cleared: truck moved forward again
       receivedBags: bags,
       receivedBy: sessionStorage.getItem("employeeName") || "",
       receivedAt: serverTimestamp()

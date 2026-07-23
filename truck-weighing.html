@@ -354,6 +354,7 @@ document.getElementById("confirmOutBtn").addEventListener("click", async () => {
   try {
     await updateDoc(doc(db, "deliveries", pgiDocId), {
       status: "Truck Out",
+      reversedIndicator: false,   // cleared: truck moved forward again
       grossWeight: gross,
       numberOfBags: bags,
       netWeight: net,
