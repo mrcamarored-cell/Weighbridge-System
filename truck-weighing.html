@@ -159,6 +159,20 @@ document.getElementById("truckInForm").addEventListener("submit", async (e) => {
   if (!currentTransporter || !currentVessel) { alert("Admin must set the current Transporter and Vessel in Settings first."); return; }
   if (truckFound && !confirmEmptyChk.checked) { alert("Please confirm the empty weight is correct (or correct it) before saving."); return; }
 
+  // ---- one open cycle per truck: block re-entry until the current one is Completed ----
+  const statusText = { "Truck In": "Truck In (waiting to be loaded)", "Loading Complete": "Loaded (waiting for PGI)", "Truck Out": "PGI done (on its way to the warehouse)" };
+  try {
+    const openSnap = await getDocs(query(collection(db, "deliveries"), where("truckNumber", "==", truckNumber)));
+    let open = null;
+    openSnap.forEach(d => { const r = d.data(); if (r.status !== "Completed") open = r; });
+    if (open) {
+      alert("⚠️ Truck " + truckNumber + " is still in an open cycle.\n\nDelivery: " + (open.deliveryNo || "—") +
+            "\nCurrent status: " + (statusText[open.status] || open.status) +
+            "\n\nIt must complete its current cycle before entering again.");
+      return;
+    }
+  } catch (err) { console.error("open-cycle check failed", err); }
+
   saveInBtn.disabled = true; saveInBtn.textContent = "Saving...";
   try {
     if (!truckFound) {

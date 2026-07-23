@@ -40,9 +40,14 @@ function startListening() {
 
     if (snap.empty) { tbody.innerHTML = "<tr><td colspan='7'>No records</td></tr>"; return; }
 
+    const seenTrucks = new Set();
     snap.forEach(d => {
       const r = d.data();
       if ((r.vessel || "") !== trackVessel) return;   // current vessel only
+      // one row per truck: keep only its most recent delivery (list is newest-first)
+      const key = String(r.truckNumber || "");
+      if (key && seenTrucks.has(key)) return;
+      if (key) seenTrucks.add(key);
       if (r.status === "Truck Out" || r.status === "Completed") {
         count++;
         totalWeight += Number(r.netWeight) || 0;
