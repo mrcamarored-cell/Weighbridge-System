@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Stevedore</title>
 <script type="module">
-import { requireAuth, requireRole, signOut, auth, db, collection, query, orderBy, limit, getDocs, updateDoc, doc, serverTimestamp }
+import { requireAuth, requireRole, signOut, auth, db, collection, query, orderBy, limit, getDocs, updateDoc, doc, serverTimestamp, logAudit }
   from "./firebase-config.js";
 
 requireAuth((user, profile) => {
@@ -110,6 +110,7 @@ document.getElementById("confirmLoadingBtn").addEventListener("click", async () 
       pickedBy: sessionStorage.getItem("employeeName") || "",
       pickedAt: serverTimestamp()
     });
+    await logAudit({ deliveryNo: selectedData.deliveryNo, truckNumber: selectedData.truckNumber, action: "Pick", fromStatus: "Truck In", toStatus: "Loading Complete", byUser: sessionStorage.getItem("employeeName") || "", reason: "" });
     alert("✅ Pick confirmed. Truck is ready for PGI at the weighbridge.");
     loadTruckInList();
   } catch (err) {

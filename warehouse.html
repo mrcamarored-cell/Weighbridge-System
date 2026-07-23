@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Warehouse Receiving</title>
 <script type="module">
-import { requireAuth, requireRole, signOut, auth, db, collection, query, where, orderBy, limit, getDocs, updateDoc, doc, serverTimestamp, verifyPassword, reverseOneStep }
+import { requireAuth, requireRole, signOut, auth, db, collection, query, where, orderBy, limit, getDocs, updateDoc, doc, serverTimestamp, verifyPassword, reverseOneStep, logAudit }
   from "./firebase-config.js";
 
 let currentUser = null;
@@ -102,6 +102,7 @@ document.getElementById("confirmReceiptBtn").addEventListener("click", async () 
       receivedBy: sessionStorage.getItem("employeeName") || "",
       receivedAt: serverTimestamp()
     });
+    await logAudit({ deliveryNo: selectedData.deliveryNo, truckNumber: selectedData.truckNumber, action: "Received", fromStatus: "Truck Out", toStatus: "Completed", byUser: sessionStorage.getItem("employeeName") || "", reason: "" });
     alert("✅ Receipt confirmed. Delivery completed.");
     document.getElementById("resultBox").style.display = "none";
     document.getElementById("searchForm").reset();

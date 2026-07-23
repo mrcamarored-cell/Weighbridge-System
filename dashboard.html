@@ -50,6 +50,7 @@ function buildMenu(role) {
   if (role === "admin") {
     items.push({ href:"users.html", icon:"👤", title:"User Management", desc:"Add users, see who's online" });
     items.push({ href:"settings.html", icon:"⚙️", title:"Settings", desc:"Transporters, vessels, targets" });
+    items.push({ href:"audit-trail.html", icon:"🧭", title:"Audit Trail", desc:"Every movement: who, when, why" });
   }
 
   menu.innerHTML = items.map(i => `

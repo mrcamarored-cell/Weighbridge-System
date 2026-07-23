@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Audit Trail</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script type="module">
+import { requireAuth, requireRole, signOut, auth, db, collection, query, orderBy, limit, getDocs }
+  from "./firebase-config.js";
+
+requireAuth((user, profile) => {
+  if (!requireRole(profile, ["admin"])) return;
+  document.getElementById("loadingScreen").style.display = "none";
+  document.getElementById("mainContent").style.display = "block";
+  loadAudit();
+});
+document.getElementById("logoutBtn").addEventListener("click", async () => { if(confirm("Sign out?")){ await signOut(auth); window.location.href="index.html"; }});
+document.getElementById("backBtn").addEventListener("click", () => window.location.href = "dashboard.html");
+document.getElementById("refreshBtn").addEventListener("click", loadAudit);
+document.getElementById("filterForm").addEventListener("submit", (e) => { e.preventDefault(); render(); });
+document.getElementById("clearBtn").addEventListener("click", () => {
+  document.getElementById("filterForm").reset();
+  render();
+});
+
+let allRows = [];
+
+const actionColors = {
+  "Truck In": "#fefcbf", "Pick": "#bee3f8", "PGI": "#feebc8", "Received": "#c6f6d5",
+  "Reverse": "#fed7d7", "Delete": "#fbb6ce", "Edit Truck In": "#e9d8fd",
+  "Factory Reset": "#fc8181", "Purge Vessel Records": "#fc8181"
+};
+
+async function loadAudit() {
+  const body = document.getElementById("tbody");
+  body.innerHTML = "<tr><td colspan='7' style='padding:12px;'>Loading...</td></tr>";
+  try {
+    const snap = await getDocs(query(collection(db, "auditLog"), orderBy("at", "desc"), limit(500)));
+    allRows = [];
+    snap.forEach(d => allRows.push(d.data()));
+    // populate user filter
+    const users = [...new Set(allRows.map(r => r.byUser).filter(Boolean))].sort();
+    const sel = document.getElementById("fUser");
+    sel.innerHTML = '<option value="">All users</option>';
+    users.forEach(u => { const o = document.createElement("option"); o.value = u; o.textContent = u; sel.appendChild(o); });
+    render();
+  } catch (err) {
+    console.error(err);
+    body.innerHTML = "<tr><td colspan='7' style='padding:12px;color:#c53030;'>Could not load the audit log.</td></tr>";
+  }
+}
+
+function filtered() {
+  const fromD = document.getElementById("fFrom").value;
+  const toD = document.getElementById("fTo").value;
+  const act = document.getElementById("fAction").value;
+  const usr = document.getElementById("fUser").value;
+  const txt = document.getElementById("fSearch").value.trim().toLowerCase();
+  const fromTs = fromD ? new Date(fromD + "T00:00:00").getTime() : null;
+  const toTs = toD ? new Date(toD + "T23:59:59").getTime() : null;
+
+  return allRows.filter(r => {
+    const t = (r.at && r.at.toMillis) ? r.at.toMillis() : null;
+    if (fromTs !== null && (t === null || t < fromTs)) return false;
+    if (toTs !== null && (t === null || t > toTs)) return false;
+    if (act && r.action !== act) return false;
+    if (usr && r.byUser !== usr) return false;
+    if (txt) {
+      const hay = ((r.deliveryNo || "") + " " + (r.truckNumber || "") + " " + (r.reason || "")).toLowerCase();
+      if (!hay.includes(txt)) return false;
+    }
+    return true;
+  });
+}
+
+function render() {
+  const rows = filtered();
+  const body = document.getElementById("tbody");
+  const c = "padding:9px;border-bottom:1px solid #edf2f7;";
+  body.innerHTML = "";
+  document.getElementById("countLabel").textContent = rows.length + " movement(s)";
+  if (rows.length === 0) { body.innerHTML = `<tr><td colspan='7' style='${c}color:#718096;'>No movements match these filters.</td></tr>`; return; }
+  rows.forEach(r => {
+    const d = (r.at && r.at.toDate) ? r.at.toDate() : null;
+    const date = d ? d.toLocaleDateString("en-GB") : "—";
+    const time = d ? d.toLocaleTimeString("en-GB") : "—";
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td style="${c}">${date}</td>` +
+      `<td style="${c}">${time}</td>` +
+      `<td style="${c}"><span style="background:${actionColors[r.action] || '#edf2f7'}; padding:3px 8px; border-radius:5px; font-weight:600;">${r.action || ""}</span></td>` +
+      `<td style="${c}">${r.deliveryNo || "—"}</td>` +
+      `<td style="${c}">${r.truckNumber || "—"}</td>` +
+      `<td style="${c}"><b>${r.byUser || "—"}</b></td>` +
+      `<td style="${c}">${(r.fromStatus || "") + (r.toStatus ? " → " + r.toStatus : "")}${r.reason ? '<br><span style="color:#c53030;font-size:12px;">' + r.reason + '</span>' : ""}</td>`;
+    body.appendChild(tr);
+  });
+}
+
+document.getElementById("exportBtn").addEventListener("click", () => {
+  const rows = filtered();
+  if (rows.length === 0) { alert("Nothing to export."); return; }
+  const data = rows.map(r => {
+    const d = (r.at && r.at.toDate) ? r.at.toDate() : null;
+    return {
+      Date: d ? d.toLocaleDateString("en-GB") : "",
+      Time: d ? d.toLocaleTimeString("en-GB") : "",
+      Action: r.action || "",
+      "Delivery No": r.deliveryNo || "",
+      Truck: r.truckNumber || "",
+      User: r.byUser || "",
+      From: r.fromStatus || "",
+      To: r.toStatus || "",
+      Reason: r.reason || ""
+    };
+  });
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Audit Trail");
+  XLSX.writeFile(wb, "Audit_Trail_" + new Date().toISOString().slice(0, 10) + ".xlsx");
+});
+</script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI',Tahoma,Arial,sans-serif; }
+body { background:#f4f6f9; min-height:100vh; }
+#loadingScreen { display:flex; align-items:center; justify-content:center; height:100vh; color:#718096; }
+#mainContent { display:none; }
+header { background:linear-gradient(135deg,#1e3a5f,#2c5282); color:#fff; padding:14px 24px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; }
+header h1{ font-size:17px; }
+.header-actions button{ background:rgba(255,255,255,.15); color:#fff; border:1px solid rgba(255,255,255,.4); padding:7px 14px; border-radius:6px; cursor:pointer; font-size:13px; margin-left:8px; }
+.container{ max-width:1150px; margin:24px auto; padding:0 16px; }
+.card{ background:#fff; border-radius:10px; padding:22px; box-shadow:0 2px 8px rgba(0,0,0,.06); margin-bottom:20px; }
+.card h2{ font-size:16px; color:#1e3a5f; margin-bottom:14px; }
+.form-row{ display:flex; gap:12px; flex-wrap:wrap; align-items:end; }
+.form-group{ flex:1; min-width:140px; }
+.form-group label{ display:block; font-size:12px; font-weight:600; color:#4a5568; margin-bottom:4px; }
+.form-group input, .form-group select{ width:100%; padding:10px 12px; border:1.5px solid #e2e8f0; border-radius:7px; font-size:14px; }
+.btn{ padding:11px 20px; background:#2c5282; color:#fff; border:none; border-radius:7px; cursor:pointer; font-weight:700; }
+.btn.green{ background:#22543d; }
+.btn.grey{ background:#718096; }
+table{ width:100%; border-collapse:collapse; font-size:13px; }
+th{ background:#f8fafc; color:#4a5568; padding:9px; text-align:left; white-space:nowrap; }
+</style>
+</head>
+<body>
+<div id="loadingScreen">Checking session...</div>
+<div id="mainContent">
+  <header>
+    <h1>🧭 Audit Trail — all movements</h1>
+    <div class="header-actions">
+      <button id="backBtn">↩ Main Menu</button>
+      <button id="logoutBtn">Sign Out</button>
+    </div>
+  </header>
+  <div class="container">
+    <div class="card">
+      <h2>Filters</h2>
+      <form id="filterForm" class="form-row">
+        <div class="form-group"><label>From Date</label><input type="date" id="fFrom"></div>
+        <div class="form-group"><label>To Date</label><input type="date" id="fTo"></div>
+        <div class="form-group"><label>Action</label>
+          <select id="fAction">
+            <option value="">All actions</option>
+            <option value="Truck In">Truck In</option>
+            <option value="Pick">Pick</option>
+            <option value="PGI">PGI</option>
+            <option value="Received">Received</option>
+            <option value="Reverse">Reverse</option>
+            <option value="Delete">Delete</option>
+            <option value="Edit Truck In">Edit Truck In</option>
+            <option value="Purge Vessel Records">Purge Vessel Records</option>
+            <option value="Factory Reset">Factory Reset</option>
+          </select>
+        </div>
+        <div class="form-group"><label>User</label><select id="fUser"><option value="">All users</option></select></div>
+        <div class="form-group"><label>Search (DN / truck / reason)</label><input type="text" id="fSearch"></div>
+        <button type="submit" class="btn">🔍 Apply</button>
+        <button type="button" id="clearBtn" class="btn grey">Clear</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
+        <h2 style="margin:0;">Movements — <span id="countLabel" style="font-weight:400; font-size:13px; color:#718096;">0</span></h2>
+        <div>
+          <button id="refreshBtn" class="btn">🔄 Refresh</button>
+          <button id="exportBtn" class="btn green">⬇ Export Excel</button>
+        </div>
+      </div>
+      <div style="overflow-x:auto;">
+        <table style="min-width:900px;">
+          <thead><tr>
+            <th>Date</th><th>Time</th><th>Action</th><th>DN</th><th>Truck</th><th>User</th><th>Details</th>
+          </tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <p style="font-size:12px; color:#718096; margin-top:12px;">Showing the most recent 500 movements.</p>
+    </div>
+  </div>
+</div>
+<script src="version.js"></script>
+</body>
+</html>

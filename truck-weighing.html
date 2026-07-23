@@ -188,6 +188,7 @@ document.getElementById("truckInForm").addEventListener("submit", async (e) => {
     });
 
     dnDisplay.value = deliveryNo;
+    await logAudit({ deliveryNo, truckNumber, action: "Truck In", fromStatus: "—", toStatus: "Truck In", byUser: sessionStorage.getItem("employeeName") || currentProfile.name || currentUser.email, reason: "" });
     alert("✅ Truck In saved. Delivery No: " + deliveryNo);
 
     // reset for the next truck (keep unit + transporter/vessel)
@@ -361,6 +362,7 @@ document.getElementById("confirmOutBtn").addEventListener("click", async () => {
       pgiAt: serverTimestamp()
     });
     alert("✅ PGI recorded. Truck is now on its way to the warehouse.");
+    await logAudit({ deliveryNo: pgiData.deliveryNo, truckNumber: pgiData.truckNumber, action: "PGI", fromStatus: "Loading Complete", toStatus: "Truck Out", byUser: sessionStorage.getItem("employeeName") || currentProfile.name || currentUser.email, reason: "" });
     document.getElementById("outResultBox").style.display = "none";
     document.getElementById("searchOutForm").reset();
     pgiDocId = null;
