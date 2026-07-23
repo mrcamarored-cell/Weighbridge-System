@@ -62,7 +62,7 @@ async function loadTruckInList() {
       tr.innerHTML =
         `<td style="padding:10px;border-bottom:1px solid #edf2f7;">${r.deliveryNo || ""}</td>` +
         `<td style="padding:10px;border-bottom:1px solid #edf2f7;">${r.truckNumber || ""}</td>` +
-        `<td style="padding:10px;border-bottom:1px solid #edf2f7;">${(Number(r.emptyWeight)||0).toFixed(0)}</td>` +
+        `<td style="padding:10px;border-bottom:1px solid #edf2f7;">${((Number(r.emptyWeight)||0)/1000).toFixed(3)}</td>` +
         `<td style="padding:10px;border-bottom:1px solid #edf2f7;color:#2c5282;font-weight:700;">Select ›</td>`;
       tr.addEventListener("click", () => selectTruck(r));
       body.appendChild(tr);
@@ -78,7 +78,7 @@ function selectTruck(r) {
   selectedData = r;
   document.getElementById("resDeliveryNo").textContent = r.deliveryNo || "";
   document.getElementById("resTruckNo").textContent = r.truckNumber || "";
-  document.getElementById("resEmptyWeight").textContent = (Number(r.emptyWeight)||0).toFixed(0);
+  document.getElementById("resEmptyWeight").textContent = ((Number(r.emptyWeight)||0)/1000).toFixed(3);
   document.getElementById("bagsInput").value = "";
   document.getElementById("estWeight").textContent = "0.00";
   document.getElementById("holdSelect").value = "";
@@ -89,7 +89,7 @@ function selectTruck(r) {
 
 document.getElementById("bagsInput").addEventListener("input", () => {
   const bags = Number(document.getElementById("bagsInput").value) || 0;
-  document.getElementById("estWeight").textContent = (bags * defaultBagWeight).toFixed(2);
+  document.getElementById("estWeight").textContent = ((bags * defaultBagWeight)/1000).toFixed(3);
 });
 
 document.getElementById("confirmLoadingBtn").addEventListener("click", async () => {
@@ -162,7 +162,7 @@ header h1{ font-size:17px; }
           <thead><tr>
             <th style="text-align:left; padding:10px; background:#f8fafc; color:#4a5568;">DN</th>
             <th style="text-align:left; padding:10px; background:#f8fafc; color:#4a5568;">Truck</th>
-            <th style="text-align:left; padding:10px; background:#f8fafc; color:#4a5568;">Empty (kg)</th>
+            <th style="text-align:left; padding:10px; background:#f8fafc; color:#4a5568;">Empty (MT)</th>
             <th style="padding:10px; background:#f8fafc;"></th>
           </tr></thead>
           <tbody id="listBody"></tbody>
@@ -174,7 +174,7 @@ header h1{ font-size:17px; }
       <h2>Selected Truck</h2>
       <div class="result-row"><span>Delivery No.</span><b id="resDeliveryNo"></b></div>
       <div class="result-row"><span>Truck No.</span><b id="resTruckNo"></b></div>
-      <div class="result-row"><span>Empty Weight (kg)</span><b id="resEmptyWeight"></b></div>
+      <div class="result-row"><span>Empty Weight (MT)</span><b id="resEmptyWeight"></b></div>
       <div class="form-group" style="margin-top:12px;">
         <label>Hold No. (loaded from)</label>
         <select id="holdSelect" style="width:100%; padding:10px 12px; border:1.5px solid #e2e8f0; border-radius:7px; font-size:14px;"></select>
@@ -183,7 +183,7 @@ header h1{ font-size:17px; }
         <label>Number of Bags loaded</label>
         <input type="number" id="bagsInput">
       </div>
-      <div class="result-row"><span>Estimated Weight (kg)</span><b id="estWeight">0.00</b></div>
+      <div class="result-row"><span>Estimated Weight (MT)</span><b id="estWeight">0.00</b></div>
       <button id="confirmLoadingBtn">✔ Pick</button>
       <p style="font-size:12px; color:#718096; margin-top:12px;">To fix a mistake, correct the bags/hold above and press Pick again.</p>
     </div>

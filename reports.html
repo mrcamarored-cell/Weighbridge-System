@@ -81,7 +81,7 @@ function renderResults(records) {
   document.getElementById("resultsSection").style.display = "block";
   let totalWeight = 0, totalBags = 0, activeCount = 0;
   records.forEach(r => {
-    if (r.status === "Reversed") return;
+    if (r.status !== "Truck Out" && r.status !== "Completed") return;   // only PGI-confirmed
     activeCount++;
     totalWeight += Number(r.netWeight)||0;
     totalBags += Number(r.numberOfBags)||0;
@@ -102,7 +102,7 @@ function renderResults(records) {
     tr.innerHTML = `
       <td>${r.deliveryNo||""}</td><td>${r.truckNumber||""}</td><td>${r.status||""}</td>
       <td>${r.weighingMethod||""}</td><td>${r.numberOfBags||0}</td>
-      <td>${(Number(r.netWeight)||0).toFixed(2)}</td><td>${r.transporter||""}</td><td>${date}</td>
+      <td>${((Number(r.netWeight)||0)/1000).toFixed(3)}</td><td>${r.transporter||""}</td><td>${date}</td>
     `;
     tbody.appendChild(tr);
   });
@@ -116,18 +116,18 @@ document.getElementById("exportBtn").addEventListener("click", () => {
     "Truck No.": r.truckNumber || "",
     "Status": r.status || "",
     "Method": r.weighingMethod || "",
-    "Empty Weight": r.emptyWeight || "",
-    "Gross Weight": r.grossWeight || "",
-    "Net Weight (kg)": Number(r.netWeight) || 0,
+    "Empty Weight (MT)": Number(((Number(r.emptyWeight)||0)/1000).toFixed(3)),
+    "Gross Weight (MT)": Number(((Number(r.grossWeight)||0)/1000).toFixed(3)),
+    "Net Weight (MT)": Number(((Number(r.netWeight)||0)/1000).toFixed(3)),
     "Bags": Number(r.numberOfBags) || 0,
     "Transporter": r.transporter || "",
     "Date": r.createdAt ? r.createdAt.toDate().toLocaleString("en-US") : ""
   }));
 
   let totalWeight = 0, totalBags = 0;
-  currentRecords.forEach(r => { if (r.status === "Reversed") return; totalWeight += Number(r.netWeight)||0; totalBags += Number(r.numberOfBags)||0; });
+  currentRecords.forEach(r => { if (r.status !== "Truck Out" && r.status !== "Completed") return; totalWeight += Number(r.netWeight)||0; totalBags += Number(r.numberOfBags)||0; });
   rows.push({});
-  rows.push({ "Delivery No.": "TOTAL", "Net Weight (kg)": totalWeight, "Bags": totalBags });
+  rows.push({ "Delivery No.": "TOTAL", "Net Weight (MT)": Number((totalWeight/1000).toFixed(3)), "Bags": totalBags });
 
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
@@ -213,10 +213,11 @@ th{ background:#f8fafc; color:#4a5568; }
         </div>
         <button id="exportBtn">⬇ Export to Excel</button>
         <table>
-          <thead><tr><th>Delivery No.</th><th>Truck</th><th>Status</th><th>Method</th><th>Bags</th><th>Net (kg)</th><th>Transporter</th><th>Date</th></tr></thead>
+          <thead><tr><th>Delivery No.</th><th>Truck</th><th>Status</th><th>Method</th><th>Bags</th><th>Net (MT)</th><th>Transporter</th><th>Date</th></tr></thead>
           <tbody id="tbody"></tbody>
         </table>
       </div>
+      <p style="font-size:12px; color:#718096; margin-top:12px;">Note: all figures are based on weighbridge (PGI) operations — nothing is counted or deducted until PGI is confirmed.</p>
     </div>
   </div>
 </div>

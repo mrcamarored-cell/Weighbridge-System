@@ -43,7 +43,7 @@ function startListening() {
     snap.forEach(d => {
       const r = d.data();
       if ((r.vessel || "") !== trackVessel) return;   // current vessel only
-      if (r.status !== "Reversed") {
+      if (r.status === "Truck Out" || r.status === "Completed") {
         count++;
         totalWeight += Number(r.netWeight) || 0;
         totalBags += Number(r.numberOfBags) || 0;
@@ -57,7 +57,7 @@ function startListening() {
         <td>${r.truckNumber || ""}</td>
         <td>${statusText[r.status] || r.status}</td>
         <td>${r.numberOfBags || 0}</td>
-        <td>${(Number(r.netWeight)||0).toFixed(2)}</td>
+        <td>${((Number(r.netWeight)||0)/1000).toFixed(3)}</td>
         <td>${r.transporter || ""}</td>
         <td>${date}</td>
       `;
@@ -107,9 +107,10 @@ th{ background:#f8fafc; color:#4a5568; position:sticky; top:0; }
     </div>
     <div class="card">
       <table>
-        <thead><tr><th>Delivery No.</th><th>Truck No.</th><th>Status</th><th>Bags</th><th>Net (kg)</th><th>Transporter</th><th>Time</th></tr></thead>
+        <thead><tr><th>Delivery No.</th><th>Truck No.</th><th>Status</th><th>Bags</th><th>Net (MT)</th><th>Transporter</th><th>Time</th></tr></thead>
         <tbody id="tbody"></tbody>
       </table>
+      <p style="font-size:12px; color:#718096; margin-top:12px;">Note: all figures are based on weighbridge (PGI) operations — nothing is counted or deducted until PGI is confirmed.</p>
     </div>
   </div>
 </div>

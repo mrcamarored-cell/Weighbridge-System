@@ -79,7 +79,7 @@ async function loadTargets() {
     const perHold = {}; // holdNo -> { bags, kg } loaded so far
     dSnap.forEach(d => {
       const r = d.data();
-      if (r.status === "Reversed") return;
+      if (r.status !== "Truck Out" && r.status !== "Completed") return;   // only PGI-confirmed counts
       if ((r.vessel || "") !== curVessel) return;   // only the current vessel's records
       const bags = Number(r.numberOfBags) || 0;
       const kg = Number(r.netWeight) || 0;
@@ -197,6 +197,7 @@ header h1{ font-size:18px; }
           <tbody id="holdProgressBody"></tbody>
         </table>
       </div>
+      <p style="font-size:12px; color:#718096; margin-top:12px;">Note: all figures are based on weighbridge (PGI) operations — nothing is counted or deducted until PGI is confirmed.</p>
     </div>
 
     <div class="menu-title">Main Menu</div>

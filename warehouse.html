@@ -45,7 +45,7 @@ async function loadWarehouseList() {
         `<td style="padding:10px;border-bottom:1px solid #edf2f7;">${r.deliveryNo || ""}</td>` +
         `<td style="padding:10px;border-bottom:1px solid #edf2f7;">${r.truckNumber || ""}</td>` +
         `<td style="padding:10px;border-bottom:1px solid #edf2f7;">${r.numberOfBags || 0}</td>` +
-        `<td style="padding:10px;border-bottom:1px solid #edf2f7;">${(Number(r.netWeight)||0).toFixed(2)}</td>` +
+        `<td style="padding:10px;border-bottom:1px solid #edf2f7;">${((Number(r.netWeight)||0)/1000).toFixed(3)}</td>` +
         `<td style="padding:10px;border-bottom:1px solid #edf2f7;color:#2c5282;font-weight:700;">Select ›</td>`;
       tr.addEventListener("click", () => selectDelivery(r, r.id));
       body.appendChild(tr);
@@ -59,8 +59,8 @@ function selectDelivery(data, docId) {
   selectedData = data;
   document.getElementById("resDeliveryNo").textContent = data.deliveryNo || "";
   document.getElementById("resTruckNo").textContent = data.truckNumber || "";
-  document.getElementById("resGross").textContent = data.grossWeight ?? "—";
-  document.getElementById("resNet").textContent = (Number(data.netWeight)||0).toFixed(2);
+  document.getElementById("resGross").textContent = data.grossWeight ? ((Number(data.grossWeight))/1000).toFixed(3) : "—";
+  document.getElementById("resNet").textContent = ((Number(data.netWeight)||0)/1000).toFixed(3);
   document.getElementById("resBagsInput").textContent = data.numberOfBags || 0;
   const box = document.getElementById("resultBox");
   box.style.display = "block";
@@ -179,7 +179,7 @@ header h1{ font-size:17px; }
             <th style="text-align:left; padding:10px; background:#f8fafc; color:#4a5568;">DN</th>
             <th style="text-align:left; padding:10px; background:#f8fafc; color:#4a5568;">Truck</th>
             <th style="text-align:left; padding:10px; background:#f8fafc; color:#4a5568;">Bags</th>
-            <th style="text-align:left; padding:10px; background:#f8fafc; color:#4a5568;">Net (kg)</th>
+            <th style="text-align:left; padding:10px; background:#f8fafc; color:#4a5568;">Net (MT)</th>
             <th style="padding:10px; background:#f8fafc;"></th>
           </tr></thead>
           <tbody id="listBody"></tbody>
@@ -196,8 +196,8 @@ header h1{ font-size:17px; }
       <h2>Delivery Details</h2>
       <div class="result-row"><span>Delivery No.</span><b id="resDeliveryNo"></b></div>
       <div class="result-row"><span>Truck No.</span><b id="resTruckNo"></b></div>
-      <div class="result-row"><span>Gross Weight</span><b id="resGross"></b></div>
-      <div class="result-row"><span>Net Weight (kg)</span><b id="resNet"></b></div>
+      <div class="result-row"><span>Gross Weight (MT)</span><b id="resGross"></b></div>
+      <div class="result-row"><span>Net Weight (MT)</span><b id="resNet"></b></div>
       <div class="result-row"><span>Number of Bags (from PGI)</span><b id="resBagsInput"></b></div>
       <p style="font-size:12px; color:#718096; margin-top:10px;">Check the bags against the load. If they match, confirm the receipt. If they don't match, reverse the truck below — corrections are made at the weighbridge.</p>
       <button id="confirmReceiptBtn">✔ Confirm Receipt (Received)</button>

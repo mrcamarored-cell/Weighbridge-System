@@ -211,7 +211,7 @@ document.getElementById("truckInForm").addEventListener("submit", async (e) => {
 
 // ================= PGI (weigh loaded truck) =================
 let pgiDocId = null, pgiEmptyWeight = 0, pgiData = null;
-let pgiUnit = "KG";
+let pgiUnit = "MT";
 let pgiBagWeightKg = 50;
 async function loadPgiBagWeight() {
   const snap = await getDocs(collection(db, "settings"));
@@ -285,9 +285,9 @@ function selectPgi(data, docId) {
   document.getElementById("outTruckNo").textContent = data.truckNumber || "";
   document.getElementById("outBags").value = data.numberOfBags || "";
   document.getElementById("outGross").value = "";
-  document.getElementById("outNetPreview").textContent = "0.00";
+  document.getElementById("outNetPreview").textContent = "0.000";
   document.getElementById("pgiMethod").value = data.weighingMethod || "Actual";
-  setPgiUnit("KG");
+  setPgiUnit("MT");
   applyPgiMethod();
   const nb = document.getElementById("outNetBox"); if (nb) { nb.style.background = "#c6f6d5"; nb.style.color = "#22543d"; }
   const nm = document.getElementById("outNetMsg"); if (nm) nm.textContent = "";
@@ -320,10 +320,10 @@ function updatePgiNet() {
     net = bags * pgiBagWeightKg;
   } else {
     const gross = pgiGrossKg();
-    if (!gross) { document.getElementById("outNetPreview").textContent = "0.00"; setPgiNetBox(true, ""); return; }
+    if (!gross) { document.getElementById("outNetPreview").textContent = "0.000"; setPgiNetBox(true, ""); return; }
     net = gross - pgiEmptyWeight;
   }
-  document.getElementById("outNetPreview").textContent = net.toFixed(2);
+  document.getElementById("outNetPreview").textContent = (net/1000).toFixed(3);
   if (net <= 0) setPgiNetBox(false, "⚠️ Net weight is zero or negative — check inputs. Cannot save.");
   else if (net > 35000) setPgiNetBox(false, "⚠️ Net weight exceeds 35 t — check inputs. Cannot save.");
   else setPgiNetBox(true, "");
@@ -711,17 +711,17 @@ header h1{ font-size:17px; }
         <div id="grossRow" style="margin-top:12px;">
           <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
             <span style="font-size:13px; font-weight:600; color:#2d3748;">Weight unit:</span>
-            <button type="button" id="pgiUnitKg" class="unit-btn active">KG</button>
-            <button type="button" id="pgiUnitMt" class="unit-btn">MT</button>
+            <button type="button" id="pgiUnitMt" class="unit-btn active">MT</button>
+            <button type="button" id="pgiUnitKg" class="unit-btn">KG</button>
           </div>
           <div class="form-group">
-            <label>Actual Gross Weight (<span id="pgiUnitLabel">KG</span>) *</label>
+            <label>Actual Gross Weight (<span id="pgiUnitLabel">MT</span>) *</label>
             <input type="number" id="outGross" step="any" placeholder="Read from scale">
           </div>
         </div>
 
         <div class="net-box" id="outNetBox" style="margin-top:12px;">
-          <div class="label">Net Weight (kg)</div>
+          <div class="label">Net Weight (MT)</div>
           <div class="value" id="outNetPreview">0.00</div>
         </div>
         <div id="outNetMsg" style="color:#c53030; font-weight:600; font-size:13px; min-height:18px; margin-top:8px;"></div>
