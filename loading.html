@@ -21,10 +21,47 @@ document.getElementById("logoutBtn").addEventListener("click", async () => { if(
 document.getElementById("backBtn").addEventListener("click", () => window.location.href = "dashboard.html");
 document.getElementById("refreshBtn").addEventListener("click", loadTruckInList);
 
-let defaultBagWeight = 50;
+let defaultBagWeight = 50, curVessel = "", tolMt = 5;
 async function loadBagWeight() {
   const snap = await getDocs(collection(db, "settings"));
-  if (!snap.empty) defaultBagWeight = Number(snap.docs[0].data().bagWeight) || 50;
+  if (!snap.empty) {
+    const st = snap.docs[0].data();
+    defaultBagWeight = Number(st.bagWeight) || 50;
+    curVessel = st.currentVessel || "";
+    tolMt = (st.stowageToleranceMt !== undefined) ? Number(st.stowageToleranceMt) : 5;
+  }
+}
+
+// ===== Stowage sequence: which holds belong to the step being worked now =====
+async function activeStepHolds() {
+  const pSnap = await getDocs(collection(db, "stowagePlan"));
+  const steps = [];
+  pSnap.forEach(d => { const p = d.data(); if ((p.vessel || "") === curVessel) steps.push(p); });
+  if (steps.length === 0) return null;                 // no plan -> no checking
+  steps.sort((a, b) => (Number(a.stepNo) || 0) - (Number(b.stepNo) || 0));
+
+  const dSnap = await getDocs(collection(db, "deliveries"));
+  const remaining = {};
+  dSnap.forEach(d => {
+    const r = d.data();
+    if ((r.vessel || "") !== curVessel) return;
+    if (r.status !== "Truck Out" && r.status !== "Completed") return;
+    if (!r.hold) return;
+    remaining[r.hold] = (remaining[r.hold] || 0) + (Number(r.netWeight) || 0) / 1000;
+  });
+
+  for (const st of steps) {
+    const t = st.targets || {};
+    let target = 0, done = 0;
+    for (const h in t) {
+      const tgt = Number(t[h]) || 0;
+      const got = Math.min(remaining[h] || 0, tgt);
+      remaining[h] = (remaining[h] || 0) - got;
+      target += tgt; done += got;
+    }
+    if (done < target - tolMt) return { stepNo: st.stepNo, holds: Object.keys(t) };  // still open
+  }
+  return null;  // plan finished
 }
 
 async function loadHoldOptions() {
@@ -98,6 +135,21 @@ document.getElementById("confirmLoadingBtn").addEventListener("click", async () 
   const bags = Number(document.getElementById("bagsInput").value);
   if (!hold) { alert("Please select the hold you loaded from."); return; }
   if (!bags || bags <= 0) { alert("Please enter number of bags."); return; }
+
+  // ---- stowage sequence check (warn + reason, never blocks) ----
+  let deviationReason = "";
+  try {
+    const act = await activeStepHolds();
+    if (act && !act.holds.includes(String(hold))) {
+      const msg = "⚠️ Stowage plan: step " + act.stepNo + " is still open (holds: " + act.holds.join(", ") +
+                  ").\nYou selected hold " + hold + ", which is outside this step.\n\nEnter the reason to continue:";
+      const r = prompt(msg);
+      if (r === null) return;
+      if (!r.trim()) { alert("A reason is required to load outside the planned sequence."); return; }
+      deviationReason = r.trim();
+    }
+  } catch (e) { console.error("sequence check failed", e); }
+
   if (!confirm("Confirm Pick for this truck?")) return;
 
   const btn = document.getElementById("confirmLoadingBtn");
@@ -109,8 +161,15 @@ document.getElementById("confirmLoadingBtn").addEventListener("click", async () 
       status: "Loading Complete",
       reversedIndicator: false,   // cleared: truck moved forward again
       pickedBy: sessionStorage.getItem("employeeName") || "",
-      pickedAt: serverTimestamp()
+      pickedAt: serverTimestamp(),
+      sequenceDeviation: deviationReason ? true : false,
+      deviationReason: deviationReason || null
     });
+    if (deviationReason) {
+      await logAudit({ deliveryNo: selectedData.deliveryNo, truckNumber: selectedData.truckNumber,
+        action: "Sequence Deviation", fromStatus: "Hold " + hold, toStatus: "outside active step",
+        byUser: sessionStorage.getItem("employeeName") || "", reason: deviationReason });
+    }
     await logAudit({ deliveryNo: selectedData.deliveryNo, truckNumber: selectedData.truckNumber, action: "Pick", fromStatus: "Truck In", toStatus: "Loading Complete", byUser: sessionStorage.getItem("employeeName") || "", reason: "" });
     alert("✅ Pick confirmed. Truck is ready for PGI at the weighbridge.");
     loadTruckInList();

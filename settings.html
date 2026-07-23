@@ -39,17 +39,20 @@ async function loadSettings() {
     const s = snap.docs[0].data();
     currentSettings = s;
     document.getElementById("bagWeight").value = s.bagWeight || "";
+    document.getElementById("stowTol").value = (s.stowageToleranceMt !== undefined ? s.stowageToleranceMt : 5);
   }
 }
 
 document.getElementById("settingsForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const bagWeight = Number(document.getElementById("bagWeight").value) || 0;
+  const stowageToleranceMt = Number(document.getElementById("stowTol").value) || 0;
 
   const id = settingsDocId || "main";
-  await setDoc(doc(db, "settings", id), { bagWeight }, { merge: true });
+  await setDoc(doc(db, "settings", id), { bagWeight, stowageToleranceMt }, { merge: true });
   settingsDocId = id;
   currentSettings.bagWeight = bagWeight;
+  currentSettings.stowageToleranceMt = stowageToleranceMt;
   alert("✅ Settings saved.");
 });
 
@@ -312,6 +315,7 @@ th,td{ padding:8px; text-align:left; border-bottom:1px solid #edf2f7; }
       <form id="settingsForm">
         <div class="grid">
           <div><label>Default Bag Weight (kg)</label><input type="number" id="bagWeight" required></div>
+          <div><label>Stowage Tolerance (MT)</label><input type="number" step="any" id="stowTol" placeholder="5"></div>
         </div>
         <button type="submit">💾 Save Settings</button>
       </form>

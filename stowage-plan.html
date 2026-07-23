@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stowage Plan</title>
+<script type="module">
+import { requireAuth, requireRole, signOut, auth, db, collection, query, orderBy, getDocs, addDoc, setDoc, deleteDoc, doc, logAudit }
+  from "./firebase-config.js";
+
+let isAdmin = false, curVessel = "", holdsList = [], planSteps = [], loadedByHold = {};
+let tolMt = 5, myName = "";
+
+requireAuth((user, profile) => {
+  if (!requireRole(profile, ["admin", "loading", "viewer", "supervisor", "weighbridge", "warehouse"])) return;
+  isAdmin = profile.role === "admin";
+  myName = sessionStorage.getItem("employeeName") || (profile && profile.name) || (user && user.email) || "";
+  document.getElementById("loadingScreen").style.display = "none";
+  document.getElementById("mainContent").style.display = "block";
+  document.getElementById("adminCard").style.display = isAdmin ? "block" : "none";
+  if (!isAdmin) document.getElementById("readOnlyNote").style.display = "block";
+  loadAll();
+});
+document.getElementById("logoutBtn").addEventListener("click", async () => { if(confirm("Sign out?")){ await signOut(auth); window.location.href="index.html"; }});
+document.getElementById("backBtn").addEventListener("click", () => window.location.href = "dashboard.html");
+document.getElementById("refreshBtn").addEventListener("click", loadAll);
+
+async function loadAll() {
+  document.getElementById("planBody").innerHTML = "<tr><td colspan='4' style='padding:12px;'>Loading...</td></tr>";
+  // current vessel
+  const sSnap = await getDocs(collection(db, "settings"));
+  const st = sSnap.empty ? {} : sSnap.docs[0].data();
+  curVessel = st.currentVessel || "";
+  tolMt = (st.stowageToleranceMt !== undefined) ? Number(st.stowageToleranceMt) : 5;
+  const tEl = document.getElementById("tolLabel"); if (tEl) tEl.textContent = tolMt;
+  document.getElementById("vesselName").textContent = curVessel || "(no vessel selected)";
+
+  // holds of this vessel
+  const hSnap = await getDocs(collection(db, "holds"));
+  holdsList = [];
+  hSnap.forEach(d => { const h = d.data(); if ((h.vessel || "") === curVessel) holdsList.push(h); });
+  holdsList.sort((a, b) => String(a.holdNo).localeCompare(String(b.holdNo), undefined, { numeric: true }));
+
+  // loaded per hold — PGI-confirmed only
+  const dSnap = await getDocs(collection(db, "deliveries"));
+  loadedByHold = {};
+  dSnap.forEach(d => {
+    const r = d.data();
+    if ((r.vessel || "") !== curVessel) return;
+    if (r.status !== "Truck Out" && r.status !== "Completed") return;
+    if (!r.hold) return;
+    loadedByHold[r.hold] = (loadedByHold[r.hold] || 0) + (Number(r.netWeight) || 0);
+  });
+
+  // plan steps
+  const pSnap = await getDocs(collection(db, "stowagePlan"));
+  planSteps = [];
+  pSnap.forEach(d => { const p = d.data(); if ((p.vessel || "") === curVessel) planSteps.push({ id: d.id, ...p }); });
+  planSteps.sort((a, b) => (Number(a.stepNo) || 0) - (Number(b.stepNo) || 0));
+
+  buildStepForm();
+  render();
+}
+
+// ===== Admin: build a target input per hold =====
+function buildStepForm() {
+  const wrap = document.getElementById("holdInputs");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  if (holdsList.length === 0) {
+    wrap.innerHTML = "<p style='font-size:13px;color:#c53030;'>No holds defined for this vessel. Add holds in Settings first.</p>";
+    return;
+  }
+  holdsList.forEach(h => {
+    const d = document.createElement("div");
+    d.className = "form-group";
+    d.innerHTML = `<label>Hold ${h.holdNo} (MT)</label><input type="number" step="any" class="holdTarget" data-hold="${h.holdNo}" placeholder="0">`;
+    wrap.appendChild(d);
+  });
+}
+
+// ===== Progress: allocate each hold's loaded tonnage across steps in order =====
+function computeProgress() {
+  const remaining = {};
+  holdsList.forEach(h => { remaining[h.holdNo] = (loadedByHold[h.holdNo] || 0) / 1000; }); // MT
+  return planSteps.map(step => {
+    const t = step.targets || {};
+    const cells = {};
+    let stepTarget = 0, stepDone = 0;
+    holdsList.forEach(h => {
+      const tgt = Number(t[h.holdNo]) || 0;
+      let done = 0;
+      if (tgt > 0) {
+        done = Math.min(remaining[h.holdNo] || 0, tgt);
+        remaining[h.holdNo] = (remaining[h.holdNo] || 0) - done;
+      }
+      cells[h.holdNo] = { tgt, done };
+      stepTarget += tgt; stepDone += done;
+    });
+    return { step, cells, stepTarget, stepDone };
+  });
+}
+
+function render() {
+  const head = document.getElementById("planHead");
+  const body = document.getElementById("planBody");
+  const c = "padding:9px;border-bottom:1px solid #edf2f7;text-align:center;";
+
+  let h = "<th>Step No</th>";
+  holdsList.forEach(x => { h += `<th>Hold ${x.holdNo}</th>`; });
+  h += "<th>Total per step (MT)</th><th>Status</th>";
+  if (isAdmin) h += "<th></th>";
+  head.innerHTML = h;
+
+  const cols = 1 + holdsList.length + 2 + (isAdmin ? 1 : 0);
+  if (!curVessel) { body.innerHTML = `<tr><td colspan='${cols}' style='${c}color:#c53030;'>No current vessel selected (Settings).</td></tr>`; return; }
+  if (planSteps.length === 0) { body.innerHTML = `<tr><td colspan='${cols}' style='${c}color:#718096;'>No stowage plan yet for this vessel.</td></tr>`; return; }
+
+  const rows = computeProgress();
+  let activeMarked = false;
+  let gTarget = 0, gDone = 0;
+
+  rows.forEach(r => {
+    const complete = r.stepTarget > 0 && r.stepDone >= r.stepTarget - tolMt;
+    let status, bg = "";
+    if (complete) { status = "🟢 Completed"; }
+    else if (!activeMarked) { status = "🔵 In progress"; bg = "background:#ebf8ff;"; activeMarked = true; }
+    else { status = "⚪ Pending"; }
+
+    gTarget += r.stepTarget; gDone += r.stepDone;
+
+    let html = `<td style="${c}${bg}"><b>${r.step.stepNo}</b></td>`;
+    holdsList.forEach(x => {
+      const cell = r.cells[x.holdNo];
+      if (!cell.tgt) { html += `<td style="${c}${bg}color:#cbd5e0;">—</td>`; return; }
+      const pct = cell.tgt > 0 ? Math.round((cell.done / cell.tgt) * 100) : 0;
+      const col = pct >= 100 ? "#22543d" : (pct > 0 ? "#2c5282" : "#718096");
+      html += `<td style="${c}${bg}"><b>${cell.tgt.toFixed(2)}</b><br><span style="font-size:11px;color:${col};">${cell.done.toFixed(2)} (${pct}%)</span></td>`;
+    });
+    const spct = r.stepTarget > 0 ? Math.round((r.stepDone / r.stepTarget) * 100) : 0;
+    html += `<td style="${c}${bg}"><b>${r.stepTarget.toFixed(2)}</b><br><span style="font-size:11px;color:#2c5282;">${r.stepDone.toFixed(2)} (${spct}%)</span></td>`;
+    html += `<td style="${c}${bg}white-space:nowrap;">${status}</td>`;
+    if (isAdmin) html += `<td style="${c}${bg}"><button class="delStep" data-id="${r.step.id}" style="background:#fed7d7;border:none;padding:4px 8px;border-radius:5px;cursor:pointer;">🗑</button></td>`;
+    const tr = document.createElement("tr");
+    tr.innerHTML = html;
+    body.appendChild(tr);
+  });
+
+  // totals row
+  const tr = document.createElement("tr");
+  tr.style.fontWeight = "700"; tr.style.background = "#f8fafc";
+  let tHtml = `<td style="${c}">TOTAL</td>`;
+  holdsList.forEach(x => {
+    let ht = 0; planSteps.forEach(s => { ht += Number((s.targets || {})[x.holdNo]) || 0; });
+    tHtml += `<td style="${c}">${ht.toFixed(2)}</td>`;
+  });
+  tHtml += `<td style="${c}">${gTarget.toFixed(2)}<br><span style="font-size:11px;color:#2c5282;">${gDone.toFixed(2)}</span></td><td style="${c}">${gTarget > 0 ? Math.round((gDone / gTarget) * 100) : 0}%</td>`;
+  if (isAdmin) tHtml += `<td style="${c}"></td>`;
+  tr.innerHTML = tHtml;
+  body.appendChild(tr);
+
+  if (isAdmin) {
+    document.querySelectorAll(".delStep").forEach(b => b.addEventListener("click", async () => {
+      const st = planSteps.find(x => x.id === b.dataset.id);
+      const reason = prompt("Reason for deleting step " + (st ? st.stepNo : "") + ":");
+      if (reason === null) return;
+      if (!reason.trim()) { alert("A reason is required to change the plan."); return; }
+      if (!confirm("Delete step " + (st ? st.stepNo : "") + " from the plan?")) return;
+      await deleteDoc(doc(db, "stowagePlan", b.dataset.id));
+      await logAudit({ action: "Plan Change", fromStatus: "Step " + (st ? st.stepNo : "") , toStatus: "(deleted)", byUser: myName, reason: reason.trim() });
+      loadAll();
+    }));
+  }
+}
+
+// ===== Admin: add / update a step =====
+document.getElementById("stepForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!isAdmin) return;
+  if (!curVessel) { alert("Select a Current Vessel in Settings first."); return; }
+  const stepNo = Number(document.getElementById("stepNo").value);
+  if (!stepNo || stepNo <= 0) { alert("Please enter a valid step number."); return; }
+
+  const targets = {};
+  let sum = 0;
+  document.querySelectorAll(".holdTarget").forEach(inp => {
+    const v = Number(inp.value) || 0;
+    if (v > 0) { targets[inp.dataset.hold] = v; sum += v; }
+  });
+  if (sum <= 0) { alert("Enter at least one hold target for this step."); return; }
+
+  const reason = document.getElementById("planReason").value.trim();
+  const existing = planSteps.find(p => Number(p.stepNo) === stepNo);
+  if (existing) {
+    if (!reason) { alert("A reason is required when changing an existing step."); return; }
+    if (!confirm("Step " + stepNo + " already exists. Replace it?")) return;
+    const before = Object.entries(existing.targets || {}).map(([k, v]) => "H" + k + ":" + v).join(", ");
+    const after = Object.entries(targets).map(([k, v]) => "H" + k + ":" + v).join(", ");
+    await setDoc(doc(db, "stowagePlan", existing.id), { vessel: curVessel, stepNo, targets });
+    await logAudit({ action: "Plan Change", fromStatus: "Step " + stepNo + " [" + before + "]", toStatus: "[" + after + "]", byUser: myName, reason });
+  } else {
+    await addDoc(collection(db, "stowagePlan"), { vessel: curVessel, stepNo, targets });
+    const after = Object.entries(targets).map(([k, v]) => "H" + k + ":" + v).join(", ");
+    await logAudit({ action: "Plan Change", fromStatus: "(new)", toStatus: "Step " + stepNo + " [" + after + "]", byUser: myName, reason: reason || "New step added" });
+  }
+  document.getElementById("stepForm").reset();
+  loadAll();
+});
+</script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI',Tahoma,Arial,sans-serif; }
+body { background:#f4f6f9; min-height:100vh; }
+#loadingScreen { display:flex; align-items:center; justify-content:center; height:100vh; color:#718096; }
+#mainContent { display:none; }
+header { background:linear-gradient(135deg,#1e3a5f,#2c5282); color:#fff; padding:14px 24px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; }
+header h1{ font-size:17px; }
+.header-actions button{ background:rgba(255,255,255,.15); color:#fff; border:1px solid rgba(255,255,255,.4); padding:7px 14px; border-radius:6px; cursor:pointer; font-size:13px; margin-left:8px; }
+.container{ max-width:1150px; margin:24px auto; padding:0 16px; }
+.card{ background:#fff; border-radius:10px; padding:22px; box-shadow:0 2px 8px rgba(0,0,0,.06); margin-bottom:20px; }
+.card h2{ font-size:16px; color:#1e3a5f; margin-bottom:14px; }
+.grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; }
+.form-group label{ display:block; font-size:12px; font-weight:600; color:#4a5568; margin-bottom:4px; }
+.form-group input{ width:100%; padding:10px 12px; border:1.5px solid #e2e8f0; border-radius:7px; font-size:14px; }
+.btn{ padding:11px 20px; background:#2c5282; color:#fff; border:none; border-radius:7px; cursor:pointer; font-weight:700; }
+table{ width:100%; border-collapse:collapse; font-size:13px; }
+th{ background:#f8fafc; color:#4a5568; padding:9px; text-align:center; white-space:nowrap; }
+</style>
+</head>
+<body>
+<div id="loadingScreen">Checking session...</div>
+<div id="mainContent">
+  <header>
+    <h1>🚢 Stowage / Loading Plan</h1>
+    <div class="header-actions">
+      <button id="backBtn">↩ Main Menu</button>
+      <button id="logoutBtn">Sign Out</button>
+    </div>
+  </header>
+  <div class="container">
+    <div class="card" id="adminCard" style="display:none;">
+      <h2>Add / Update a Step</h2>
+      <p style="font-size:12px; color:#718096; margin-bottom:12px;">Enter the target tonnage per hold for this step. Leave a hold blank if it isn't worked in this step. Re-using an existing step number replaces it.</p>
+      <form id="stepForm">
+        <div class="grid">
+          <div class="form-group"><label>Step No</label><input type="number" id="stepNo" min="1" required></div>
+        </div>
+        <div class="grid" id="holdInputs" style="margin-top:12px;"></div>
+        <div class="form-group" style="margin-top:12px;"><label>Reason for change (required when editing an existing step)</label><input type="text" id="planReason" placeholder="e.g. vessel trim adjustment"></div>
+        <button type="submit" class="btn" style="margin-top:14px;">➕ Save Step</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:6px;">
+        <h2 style="margin:0;">Plan — Vessel: <span id="vesselName" style="color:#2c5282;">—</span></h2>
+        <button id="refreshBtn" class="btn">🔄 Refresh</button>
+      </div>
+      <p id="readOnlyNote" style="display:none; font-size:12px; color:#718096; margin-bottom:10px;">View only — the plan is maintained by the admin.</p>
+      <p style="font-size:12px; color:#718096; margin-bottom:12px;">Each cell shows the <b>target</b> on top and the <b>loaded amount</b> below it. Steps complete in order, within a tolerance of <b>±<span id="tolLabel">5</span> MT</b>.</p>
+      <div style="overflow-x:auto;">
+        <table style="min-width:640px;">
+          <thead><tr id="planHead"></tr></thead>
+          <tbody id="planBody"></tbody>
+        </table>
+      </div>
+      <p style="font-size:12px; color:#718096; margin-top:12px;">Note: progress is based on weighbridge (PGI) operations — nothing is counted until PGI is confirmed.</p>
+    </div>
+  </div>
+</div>
+<script src="version.js"></script>
+</body>
+</html>
